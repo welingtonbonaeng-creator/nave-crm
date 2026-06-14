@@ -1,0 +1,8 @@
+{
+  "name": "nave-crm-imobiliario",
+  "version": "1.0.0",
+  "description": "CRM Imobiliário para Corretores",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "license": "UNLICENSED"
+}
