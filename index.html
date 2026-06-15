@@ -867,7 +867,14 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
             <option value="retorno">📲 Retorno de Contato</option>
           </select>
         </div>
-        <div class="form-group"><label class="form-label">Cliente</label><input class="form-input" id="eCliente" placeholder="Nome do cliente"></div>
+        <div class="form-group">
+          <label class="form-label">Cliente</label>
+          <select class="form-select" id="eClienteSel" onchange="onChangeClienteEvento()">
+            <option value="">— Selecionar lead existente —</option>
+            <option value="__novo__">✏️ Outro cliente (digitar)</option>
+          </select>
+          <input class="form-input" id="eCliente" placeholder="Nome do cliente..." style="display:none;margin-top:6px">
+        </div>
       </div>
       <div class="form-group"><label class="form-label">Notas</label><textarea class="form-textarea" id="eNotas" placeholder="Detalhes do compromisso..."></textarea></div>
     </div>
@@ -2911,14 +2918,52 @@ function salvarLead() {
 // ══════════════════════════════════════════════
 // SALVAR EVENTO
 // ══════════════════════════════════════════════
+function _popularClientesSel(clienteAtual) {
+  const sel = document.getElementById('eClienteSel');
+  const inp = document.getElementById('eCliente');
+  if(!sel) return;
+  const leads = [...state.leads].sort((a,b)=>a.nome.localeCompare(b.nome));
+  sel.innerHTML =
+    '<option value="">— Selecionar lead existente —</option>' +
+    leads.map(l=>`<option value="${l.nome}">${l.nome}${l.tel?' · '+l.tel:''}</option>`).join('') +
+    '<option value="__novo__">✏️ Outro cliente (digitar nome)</option>';
+  if(clienteAtual) {
+    const existe = leads.find(l=>l.nome===clienteAtual);
+    if(existe) { sel.value=clienteAtual; inp.style.display='none'; inp.value=''; }
+    else        { sel.value='__novo__';  inp.style.display='block'; inp.value=clienteAtual; }
+  } else {
+    sel.value=''; inp.style.display='none'; inp.value='';
+  }
+}
+function onChangeClienteEvento() {
+  const sel = document.getElementById('eClienteSel');
+  const inp = document.getElementById('eCliente');
+  if(sel.value==='__novo__') { inp.style.display='block'; inp.value=''; inp.focus(); }
+  else {
+    inp.style.display='none'; inp.value='';
+    if(sel.value) {
+      const tEl  = document.getElementById('eTitulo');
+      const tipo = document.getElementById('eTipo').value;
+      const tLabel = {visita:'Visita',reuniao:'Reunião',ligacao:'Ligação',retorno:'Retorno'};
+      if(tEl && !tEl.value.trim()) tEl.value = (tLabel[tipo]||'Evento') + ' — ' + sel.value;
+    }
+  }
+}
+function _getEventoCliente() {
+  const sel = document.getElementById('eClienteSel');
+  if(!sel) return document.getElementById('eCliente')?.value.trim()||'';
+  if(sel.value==='__novo__') return document.getElementById('eCliente').value.trim();
+  return sel.value;
+}
 function abrirNovoEvento() {
   document.getElementById('eEditId').value = '';
   document.getElementById('modalEventoTitulo').textContent = 'Novo Evento';
   document.getElementById('btnSalvarEvento').textContent   = 'Salvar evento';
-  ['eTitulo','eCliente','eNotas'].forEach(id=>document.getElementById(id).value='');
+  ['eTitulo','eNotas'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('eData').value = '';
   document.getElementById('eHora').value = '09:00';
   document.getElementById('eTipo').value = 'visita';
+  _popularClientesSel('');
   openModal('modalEvento');
 }
 function editarEvento(id) {
@@ -2927,12 +2972,12 @@ function editarEvento(id) {
   document.getElementById('eEditId').value              = id;
   document.getElementById('modalEventoTitulo').textContent = 'Editar Evento';
   document.getElementById('btnSalvarEvento').textContent   = 'Salvar alterações';
-  document.getElementById('eTitulo').value  = e.titulo  || '';
-  document.getElementById('eData').value    = e.data    || '';
-  document.getElementById('eHora').value    = e.hora    || '09:00';
-  document.getElementById('eTipo').value    = e.tipo    || 'visita';
-  document.getElementById('eCliente').value = e.cliente || '';
-  document.getElementById('eNotas').value   = e.notas   || '';
+  document.getElementById('eTitulo').value = e.titulo || '';
+  document.getElementById('eData').value   = e.data   || '';
+  document.getElementById('eHora').value   = e.hora   || '09:00';
+  document.getElementById('eTipo').value   = e.tipo   || 'visita';
+  document.getElementById('eNotas').value  = e.notas  || '';
+  _popularClientesSel(e.cliente || '');
   openModal('modalEvento');
 }
 function salvarEvento() {
@@ -2940,22 +2985,21 @@ function salvarEvento() {
   const data   = document.getElementById('eData').value;
   if(!titulo || !data) { alert('Preencha título e data'); return; }
   const editId = parseInt(document.getElementById('eEditId').value);
+  const cliente = _getEventoCliente();
   if(editId) {
     const idx = state.eventos.findIndex(e=>e.id===editId);
     if(idx > -1) {
-      state.eventos[idx] = { ...state.eventos[idx], titulo, data,
-        hora:    document.getElementById('eHora').value,
-        tipo:    document.getElementById('eTipo').value,
-        cliente: document.getElementById('eCliente').value,
-        notas:   document.getElementById('eNotas').value
+      state.eventos[idx] = { ...state.eventos[idx], titulo, data, cliente,
+        hora:  document.getElementById('eHora').value,
+        tipo:  document.getElementById('eTipo').value,
+        notas: document.getElementById('eNotas').value
       };
     }
   } else {
-    state.eventos.push({ id: state.nextId++, titulo, data,
-      hora:    document.getElementById('eHora').value,
-      tipo:    document.getElementById('eTipo').value,
-      cliente: document.getElementById('eCliente').value,
-      notas:   document.getElementById('eNotas').value
+    state.eventos.push({ id: state.nextId++, titulo, data, cliente,
+      hora:  document.getElementById('eHora').value,
+      tipo:  document.getElementById('eTipo').value,
+      notas: document.getElementById('eNotas').value
     });
   }
   closeModal('modalEvento'); render(); scheduleSave();
