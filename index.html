@@ -1256,12 +1256,14 @@ function fecharMotiv() { document.getElementById('motivOverlay').classList.remov
 
 // ── Persistência: Supabase ──
 let _saveTimer = null;
+let _saving = false;
 function scheduleSave() {
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => { if(currentUser) scheduleSave(); }, 3000);
+  _saveTimer = setTimeout(saveUserState, 2000); // corrigido: chama saveUserState
 }
 async function saveUserState() {
-  if(!currentUser) return;
+  if(!currentUser || _saving) return;
+  _saving = true;
   const payload = {
     username:   currentUser.username,
     leads:      state.leads,
@@ -1270,22 +1272,24 @@ async function saveUserState() {
     vendas:     state.vendas,
     next_id:    state.nextId,
     pipe_ordem: state.pipeOrdem || null,
-    alertas:    state.alertas   || null
+    alertas:    state.alertas   || null,
+    updated_at: new Date().toISOString()
   };
   const { error } = await _sb.from('nave_state').upsert(payload, { onConflict: 'username' });
   if(error) console.error('saveUserState:', error);
+  _saving = false;
 }
 async function loadUserState(username) {
   showLoading('Carregando dados...');
   try {
     const { data } = await _sb.from('nave_state').select('*').eq('username', username).single();
     if(data) {
-      if(data.leads?.length   > 0) state.leads   = data.leads;
-      if(data.eventos?.length > 0) state.eventos = data.eventos;
-      if(data.imoveis?.length > 0) state.imoveis = data.imoveis;
-      if(data.vendas?.length  > 0) state.vendas  = data.vendas;
-      if(data.next_id         > 0) state.nextId  = data.next_id;
-      if(data.pipe_ordem?.length === ETAPAS.length) {
+      state.leads   = Array.isArray(data.leads)   ? data.leads   : state.leads;
+      state.eventos = Array.isArray(data.eventos) ? data.eventos : state.eventos;
+      state.imoveis = Array.isArray(data.imoveis) ? data.imoveis : state.imoveis;
+      state.vendas  = Array.isArray(data.vendas)  ? data.vendas  : state.vendas;
+      if(data.next_id > 0) state.nextId = data.next_id;
+      if(Array.isArray(data.pipe_ordem) && data.pipe_ordem.length === ETAPAS.length) {
         ETAPAS.length = 0;
         data.pipe_ordem.forEach(e => ETAPAS.push(e));
       }
@@ -1295,7 +1299,12 @@ async function loadUserState(username) {
   hideLoading();
   render();
 }
-setInterval(() => { if(currentUser) scheduleSave(); }, 30000);
+// Salva a cada 20 segundos em background
+setInterval(() => { if(currentUser) saveUserState(); }, 20000);
+// Salva quando o usuário troca de aba ou fecha a janela
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden' && currentUser) saveUserState();
+});
 
 // ── Admin ──
 async function openAdmin() {
