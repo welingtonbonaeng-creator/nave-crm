@@ -355,13 +355,23 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
     <div class="modal-body">
       <div id="adminUserList" style="margin-bottom:20px"></div>
       <div style="background:var(--bg3);border-radius:10px;padding:16px;margin-bottom:16px">
-        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px">🔑 Código de Acesso para novos cadastros</div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Compartilhe com quem pode criar conta. Deixe vazio para bloquear novos cadastros.</div>
-        <div style="display:flex;gap:8px">
-          <input class="form-input" id="accessCodeInput" placeholder="Ex: nave2026" style="flex:1">
-          <button class="btn btn-primary btn-sm" onclick="salvarCodigo()">Salvar</button>
+        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">🔑 Código de Convite (uso único)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Gere um código e envie para o corretor. Após o primeiro uso o código expira automaticamente.</div>
+        <div id="accessCodeDisplay" style="display:none;background:var(--bg4);border:1px solid var(--accent);border-radius:8px;padding:16px;margin-bottom:12px;text-align:center">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px">Código ativo</div>
+          <div id="accessCodeText" style="font-size:26px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent2);letter-spacing:4px"></div>
+          <div style="font-size:10px;color:var(--yellow);margin-top:8px">⚠️ Válido para um único cadastro — expira após o uso</div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:10px;font-size:11px" onclick="copiarCodigo()">📋 Copiar código</button>
         </div>
-        <div id="accessCodeStatus" style="font-size:11px;margin-top:6px;color:var(--text3)"></div>
+        <div id="accessCodeEmpty" style="background:var(--bg4);border:1px dashed var(--border2);border-radius:8px;padding:14px;margin-bottom:12px;text-align:center">
+          <div style="font-size:12px;color:var(--text3)">Nenhum código ativo</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:3px">Novos cadastros estão bloqueados</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" style="flex:1" onclick="gerarNovoCodigo()">⚡ Gerar novo código</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparCodigo()" title="Bloquear novos cadastros" style="padding:8px 12px">🚫</button>
+        </div>
+        <div id="accessCodeStatus" style="font-size:11px;margin-top:8px;color:var(--text3)"></div>
       </div>
       <div style="background:var(--bg3);border-radius:10px;padding:16px">
         <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px">➕ Novo Usuário</div>
@@ -979,12 +989,15 @@ async function doRegister() {
   if(pass !== pass2)   return showErr('As senhas não coincidem');
   showLoading('Verificando...');
   const { data: cfgCode } = await _sb.from('nave_config').select('value').eq('key','access_code').single();
-  const savedCode = cfgCode?.value || 'crmcarioca';
-  if(code.toLowerCase() !== savedCode.toLowerCase()) return showErr('Código de acesso inválido. Solicite ao administrador.');
+  const savedCode = cfgCode?.value || '';
+  if(!savedCode) return showErr('Nenhum código ativo no momento. Solicite um novo ao administrador.');
+  if(code.toLowerCase() !== savedCode.toLowerCase()) return showErr('Código inválido ou já utilizado. Solicite um novo ao administrador.');
   const { data: existing } = await _sb.from('nave_users').select('username').eq('username', user).single();
   if(existing) return showErr('Este login já existe');
   const { error } = await _sb.from('nave_users').insert({ username:user, name, password:pass, role:'corretor', nascimento:nasc||'' });
   if(error) return showErr('Erro ao criar conta: ' + error.message);
+  // Invalidar código após uso único
+  await _sb.from('nave_config').upsert({ key:'access_code', value:'' }, { onConflict:'key' });
   localStorage.setItem(LOGIN_KEY, user);
   const { data: newUser } = await _sb.from('nave_users').select('*').eq('username', user).single();
   hideLoading();
@@ -1161,18 +1174,46 @@ setInterval(() => { if(currentUser) scheduleSave(); }, 30000);
 // ── Admin ──
 async function openAdmin() {
   await renderAdminUsers();
-  const { data: cfgCode } = await _sb.from('nave_config').select('value').eq('key','access_code').single();
-  const code = cfgCode?.value || 'crmcarioca';
-  const inp = document.getElementById('accessCodeInput');
-  const status = document.getElementById('accessCodeStatus');
-  if(inp) inp.value = code;
-  if(status) status.textContent = '✅ Código ativo: "' + code + '"';
+  await renderCodigoAtivo();
   document.getElementById('adminPanel').classList.add('open');
 }
-async function salvarCodigo() {
-  const code = document.getElementById('accessCodeInput').value.trim() || 'crmcarioca';
+async function renderCodigoAtivo() {
+  const { data: cfgCode } = await _sb.from('nave_config').select('value').eq('key','access_code').single();
+  const code = cfgCode?.value || '';
+  const display = document.getElementById('accessCodeDisplay');
+  const empty   = document.getElementById('accessCodeEmpty');
+  const text    = document.getElementById('accessCodeText');
+  if(code) {
+    if(display) display.style.display = 'block';
+    if(empty)   empty.style.display   = 'none';
+    if(text)    text.textContent       = code;
+  } else {
+    if(display) display.style.display = 'none';
+    if(empty)   empty.style.display   = 'block';
+  }
+}
+function _randomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c = '';
+  for(let i = 0; i < 8; i++) c += chars[Math.floor(Math.random() * chars.length)];
+  return c;
+}
+async function gerarNovoCodigo() {
+  const code = _randomCode();
   await _sb.from('nave_config').upsert({ key:'access_code', value:code }, { onConflict:'key' });
-  document.getElementById('accessCodeStatus').textContent = '✅ Código ativo: "' + code + '"';
+  await renderCodigoAtivo();
+  document.getElementById('accessCodeStatus').textContent = '✅ Código gerado! Copie e envie ao corretor.';
+}
+async function copiarCodigo() {
+  const code = document.getElementById('accessCodeText')?.textContent || '';
+  if(!code) return;
+  await navigator.clipboard.writeText(code);
+  document.getElementById('accessCodeStatus').textContent = '📋 Copiado para a área de transferência!';
+}
+async function limparCodigo() {
+  await _sb.from('nave_config').upsert({ key:'access_code', value:'' }, { onConflict:'key' });
+  await renderCodigoAtivo();
+  document.getElementById('accessCodeStatus').textContent = '🚫 Cadastros bloqueados.';
 }
 function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
 async function renderAdminUsers() {

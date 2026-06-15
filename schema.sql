@@ -36,9 +36,9 @@ INSERT INTO nave_users (username, name, password, role)
 VALUES ('carioca', 'Carlos Henrique', '1406', 'admin')
 ON CONFLICT DO NOTHING;
 
--- Código de acesso padrão
+-- Código de convite (vazio = bloqueado; admin gera via painel)
 INSERT INTO nave_config (key, value)
-VALUES ('access_code', 'crmcarioca')
+VALUES ('access_code', '')
 ON CONFLICT DO NOTHING;
 
 -- RLS: habilitar e permitir acesso via anon key (controle no app)
