@@ -267,6 +267,12 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:10px}
 
+/* ── ADMIN TABS ── */
+.admin-tab-btn{flex:1;padding:12px 8px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text3);font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;font-family:'Inter',sans-serif}
+.admin-tab-btn.active{color:var(--accent2);border-bottom-color:var(--accent)}
+.admin-tab-btn:hover{color:var(--text1)}
+.solic-badge{display:inline-flex;align-items:center;justify-content:center;background:var(--red);color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;padding:0 4px;border-radius:8px;margin-left:5px;vertical-align:middle}
+
 @media(max-width:900px){
   .sidebar{width:60px}
   .logo-text,.logo-sub,.nav-section,.nav-item span:not(.ico),.user-name,.user-role{display:none}
@@ -334,11 +340,54 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
       </div>
       <div id="regCodeRow" class="form-group">
         <label class="form-label">Código de acesso</label>
-        <input class="form-input" id="regCode" placeholder="Solicite ao administrador">
-        <div style="font-size:10px;color:var(--text3);margin-top:3px">Necessário para criar conta de corretor</div>
+        <input class="form-input" id="regCode" placeholder="Cole o código recebido do admin">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px">
+          <div style="font-size:10px;color:var(--text3)">Necessário para criar conta</div>
+          <span style="font-size:10px;color:var(--accent2);cursor:pointer;font-weight:600" onclick="showAuthScreen('request')">Não tenho código →</span>
+        </div>
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:4px;padding:12px" onclick="doRegister()">Criar conta</button>
       <div style="text-align:center;margin-top:14px">
+        <span style="font-size:12px;color:var(--accent2);cursor:pointer;font-weight:600" onclick="showAuthScreen('login')">← Voltar ao login</span>
+      </div>
+    </div>
+
+    <!-- TELA: SOLICITAR CÓDIGO -->
+    <div id="authRequest" style="display:none">
+      <div class="login-title">Solicitar acesso</div>
+      <div class="login-sub">Preencha seus dados — o admin receberá sua solicitação e gerará seu código</div>
+      <div class="login-err" id="requestErr"></div>
+      <div class="form-group"><label class="form-label">Nome completo</label>
+        <input class="form-input" id="reqName" placeholder="João Silva">
+      </div>
+      <div class="form-group"><label class="form-label">Login desejado</label>
+        <input class="form-input" id="reqUser" placeholder="joao.silva (sem espaços)">
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:4px;padding:12px" onclick="doSolicitarCodigo()">📩 Enviar solicitação</button>
+      <div style="text-align:center;margin-top:14px">
+        <span style="font-size:12px;color:var(--accent2);cursor:pointer;font-weight:600" onclick="showAuthScreen('register')">← Voltar ao cadastro</span>
+      </div>
+    </div>
+
+    <!-- TELA: AGUARDANDO APROVAÇÃO -->
+    <div id="authWaiting" style="display:none">
+      <div style="text-align:center;padding:8px 0 16px">
+        <div style="font-size:44px;margin-bottom:10px" id="waitingIcon">⏳</div>
+        <div class="login-title" id="waitingTitle">Solicitação enviada!</div>
+        <div class="login-sub" style="margin-bottom:20px" id="waitingSub">O admin receberá sua solicitação em breve</div>
+      </div>
+      <div id="waitingCodeBox" style="display:none;background:var(--greenbg);border:1px solid var(--green);border-radius:10px;padding:18px;margin-bottom:14px;text-align:center">
+        <div style="font-size:10px;color:var(--green);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px;font-weight:700">✅ Código aprovado!</div>
+        <div id="waitingCodeText" style="font-size:28px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--green);letter-spacing:4px"></div>
+        <div style="font-size:10px;color:var(--text3);margin-top:8px">Use este código para criar sua conta</div>
+        <button class="btn btn-primary" style="margin-top:12px;width:100%" onclick="usarCodigoSolicitado()">Criar minha conta →</button>
+      </div>
+      <div id="waitingPendingBox" style="background:var(--yellowbg);border:1px solid var(--yellow);border-radius:10px;padding:14px;margin-bottom:14px;text-align:center">
+        <div style="font-size:12px;color:var(--yellow);font-weight:600">Aguardando aprovação do admin...</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px">Clique em "Verificar" quando o admin confirmar</div>
+      </div>
+      <button class="btn btn-ghost" style="width:100%;margin-bottom:10px" onclick="verificarSolicitacao()">🔄 Verificar status</button>
+      <div style="text-align:center">
         <span style="font-size:12px;color:var(--accent2);cursor:pointer;font-weight:600" onclick="showAuthScreen('login')">← Voltar ao login</span>
       </div>
     </div>
@@ -349,30 +398,18 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 <div id="adminPanel">
   <div class="admin-box">
     <div class="modal-head">
-      <div class="modal-title">⚙️ Gerenciar Usuários</div>
+      <div class="modal-title">⚙️ Painel Admin</div>
       <button class="modal-close" onclick="closeAdmin()">✕</button>
     </div>
-    <div class="modal-body">
+    <!-- Tabs -->
+    <div style="display:flex;border-bottom:1px solid var(--border)">
+      <button id="tabUsuarios" class="admin-tab-btn active" onclick="showAdminTab('usuarios')">👥 Usuários</button>
+      <button id="tabSolicitacoes" class="admin-tab-btn" onclick="showAdminTab('solicitacoes')">📩 Solicitações <span id="badgeSolic" style="display:none" class="solic-badge">0</span></button>
+    </div>
+
+    <!-- Tab: Usuários -->
+    <div id="adminTabUsuarios" class="modal-body">
       <div id="adminUserList" style="margin-bottom:20px"></div>
-      <div style="background:var(--bg3);border-radius:10px;padding:16px;margin-bottom:16px">
-        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">🔑 Código de Convite (uso único)</div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Gere um código e envie para o corretor. Após o primeiro uso o código expira automaticamente.</div>
-        <div id="accessCodeDisplay" style="display:none;background:var(--bg4);border:1px solid var(--accent);border-radius:8px;padding:16px;margin-bottom:12px;text-align:center">
-          <div style="font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px">Código ativo</div>
-          <div id="accessCodeText" style="font-size:26px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent2);letter-spacing:4px"></div>
-          <div style="font-size:10px;color:var(--yellow);margin-top:8px">⚠️ Válido para um único cadastro — expira após o uso</div>
-          <button class="btn btn-ghost btn-sm" style="margin-top:10px;font-size:11px" onclick="copiarCodigo()">📋 Copiar código</button>
-        </div>
-        <div id="accessCodeEmpty" style="background:var(--bg4);border:1px dashed var(--border2);border-radius:8px;padding:14px;margin-bottom:12px;text-align:center">
-          <div style="font-size:12px;color:var(--text3)">Nenhum código ativo</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:3px">Novos cadastros estão bloqueados</div>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-primary" style="flex:1" onclick="gerarNovoCodigo()">⚡ Gerar novo código</button>
-          <button class="btn btn-ghost btn-sm" onclick="limparCodigo()" title="Bloquear novos cadastros" style="padding:8px 12px">🚫</button>
-        </div>
-        <div id="accessCodeStatus" style="font-size:11px;margin-top:8px;color:var(--text3)"></div>
-      </div>
       <div style="background:var(--bg3);border-radius:10px;padding:16px">
         <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px">➕ Novo Usuário</div>
         <div class="form-row">
@@ -391,6 +428,29 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
         <div id="adminErr" style="color:var(--red);font-size:11px;margin-top:8px;display:none"></div>
         <button class="btn btn-primary" style="margin-top:12px;width:100%" onclick="criarUsuario()">Criar Usuário</button>
       </div>
+    </div>
+
+    <!-- Tab: Solicitações -->
+    <div id="adminTabSolicitacoes" class="modal-body" style="display:none">
+      <div style="background:var(--bg3);border-radius:10px;padding:16px;margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">🔑 Código avulso (uso único)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Gere e copie para enviar manualmente pelo WhatsApp.</div>
+        <div id="accessCodeDisplay" style="display:none;background:var(--bg4);border:1px solid var(--accent);border-radius:8px;padding:14px;margin-bottom:10px;text-align:center">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:5px;text-transform:uppercase;letter-spacing:.8px">Código ativo</div>
+          <div id="accessCodeText" style="font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent2);letter-spacing:4px"></div>
+          <div style="font-size:10px;color:var(--yellow);margin-top:6px">⚠️ Expira após o primeiro uso</div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:8px;font-size:11px" onclick="copiarCodigo()">📋 Copiar</button>
+        </div>
+        <div id="accessCodeEmpty" style="background:var(--bg4);border:1px dashed var(--border2);border-radius:8px;padding:12px;margin-bottom:10px;text-align:center">
+          <div style="font-size:11px;color:var(--text3)">Nenhum código avulso ativo</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" style="flex:1" onclick="gerarNovoCodigo()">⚡ Gerar código avulso</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparCodigo()" title="Cancelar código" style="padding:8px 12px">🚫</button>
+        </div>
+        <div id="accessCodeStatus" style="font-size:11px;margin-top:8px;color:var(--text3)"></div>
+      </div>
+      <div id="adminRequestList"></div>
     </div>
   </div>
 </div>
@@ -968,7 +1028,9 @@ async function initAuth() {
 function showAuthScreen(screen) {
   document.getElementById('authLogin').style.display    = screen === 'login'    ? '' : 'none';
   document.getElementById('authRegister').style.display = screen === 'register' ? '' : 'none';
-  ['loginErr','registerErr'].forEach(id => {
+  document.getElementById('authRequest').style.display  = screen === 'request'  ? '' : 'none';
+  document.getElementById('authWaiting').style.display  = screen === 'waiting'  ? '' : 'none';
+  ['loginErr','registerErr','requestErr'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.textContent=''; el.classList.remove('show'); el.style.display='none'; }
   });
@@ -988,16 +1050,26 @@ async function doRegister() {
   if(pass.length < 4)  return showErr('Senha deve ter pelo menos 4 caracteres');
   if(pass !== pass2)   return showErr('As senhas não coincidem');
   showLoading('Verificando...');
+  let codeValid = false, requestId = null;
+  // 1. Verificar código avulso (nave_config)
   const { data: cfgCode } = await _sb.from('nave_config').select('value').eq('key','access_code').single();
-  const savedCode = cfgCode?.value || '';
-  if(!savedCode) return showErr('Nenhum código ativo no momento. Solicite um novo ao administrador.');
-  if(code.toLowerCase() !== savedCode.toLowerCase()) return showErr('Código inválido ou já utilizado. Solicite um novo ao administrador.');
+  if(cfgCode?.value && code.toLowerCase() === cfgCode.value.toLowerCase()) codeValid = true;
+  // 2. Verificar código de solicitação (nave_requests)
+  if(!codeValid) {
+    const { data: req } = await _sb.from('nave_requests').select('id,code').eq('code', code).eq('status','approved').single();
+    if(req) { codeValid = true; requestId = req.id; }
+  }
+  if(!codeValid) return showErr('Código inválido ou já utilizado. Solicite um novo ao administrador.');
   const { data: existing } = await _sb.from('nave_users').select('username').eq('username', user).single();
   if(existing) return showErr('Este login já existe');
   const { error } = await _sb.from('nave_users').insert({ username:user, name, password:pass, role:'corretor', nascimento:nasc||'' });
   if(error) return showErr('Erro ao criar conta: ' + error.message);
   // Invalidar código após uso único
-  await _sb.from('nave_config').upsert({ key:'access_code', value:'' }, { onConflict:'key' });
+  if(requestId) {
+    await _sb.from('nave_requests').update({ status:'used' }).eq('id', requestId);
+  } else {
+    await _sb.from('nave_config').upsert({ key:'access_code', value:'' }, { onConflict:'key' });
+  }
   localStorage.setItem(LOGIN_KEY, user);
   const { data: newUser } = await _sb.from('nave_users').select('*').eq('username', user).single();
   hideLoading();
@@ -1174,8 +1246,20 @@ setInterval(() => { if(currentUser) scheduleSave(); }, 30000);
 // ── Admin ──
 async function openAdmin() {
   await renderAdminUsers();
-  await renderCodigoAtivo();
+  showAdminTab('usuarios');
+  // Carregar badge de solicitações pendentes
+  const { data } = await _sb.from('nave_requests').select('id').eq('status','pending');
+  const n = (data||[]).length;
+  const b = document.getElementById('badgeSolic');
+  if(b) { b.textContent = n; b.style.display = n ? '' : 'none'; }
   document.getElementById('adminPanel').classList.add('open');
+}
+function showAdminTab(tab) {
+  document.getElementById('adminTabUsuarios').style.display     = tab === 'usuarios'     ? '' : 'none';
+  document.getElementById('adminTabSolicitacoes').style.display = tab === 'solicitacoes' ? '' : 'none';
+  document.getElementById('tabUsuarios').classList.toggle('active',     tab === 'usuarios');
+  document.getElementById('tabSolicitacoes').classList.toggle('active', tab === 'solicitacoes');
+  if(tab === 'solicitacoes') { renderCodigoAtivo(); renderSolicitacoes(); }
 }
 async function renderCodigoAtivo() {
   const { data: cfgCode } = await _sb.from('nave_config').select('value').eq('key','access_code').single();
@@ -1216,6 +1300,94 @@ async function limparCodigo() {
   document.getElementById('accessCodeStatus').textContent = '🚫 Cadastros bloqueados.';
 }
 function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
+
+// ── Solicitações de acesso ──
+let _pendingRequestId = null;
+async function doSolicitarCodigo() {
+  const name = document.getElementById('reqName').value.trim();
+  const user = document.getElementById('reqUser').value.trim().toLowerCase().replace(/\s/g,'');
+  const errEl = document.getElementById('requestErr');
+  const showErr = msg => { errEl.textContent=msg; errEl.style.display='block'; errEl.classList.add('show'); };
+  if(!name) return showErr('Informe seu nome completo');
+  if(!user) return showErr('Informe o login desejado');
+  showLoading('Enviando...');
+  const { data: ex } = await _sb.from('nave_users').select('username').eq('username', user).single();
+  if(ex) { hideLoading(); return showErr('Este login já está em uso, escolha outro'); }
+  const { data, error } = await _sb.from('nave_requests').insert({ name, username:user, status:'pending' }).select().single();
+  hideLoading();
+  if(error) return showErr('Erro ao enviar: ' + error.message);
+  _pendingRequestId = data.id;
+  showAuthScreen('waiting');
+}
+async function verificarSolicitacao() {
+  if(!_pendingRequestId) return;
+  showLoading('Verificando...');
+  const { data } = await _sb.from('nave_requests').select('*').eq('id', _pendingRequestId).single();
+  hideLoading();
+  if(!data) return;
+  if(data.status === 'approved' && data.code) {
+    document.getElementById('waitingCodeBox').style.display  = 'block';
+    document.getElementById('waitingPendingBox').style.display = 'none';
+    document.getElementById('waitingCodeText').textContent   = data.code;
+    document.getElementById('waitingIcon').textContent       = '✅';
+    document.getElementById('waitingTitle').textContent      = 'Código aprovado!';
+    document.getElementById('waitingSub').textContent        = 'Seu código de acesso está pronto';
+  }
+}
+function usarCodigoSolicitado() {
+  const code = document.getElementById('waitingCodeText').textContent;
+  showAuthScreen('register');
+  setTimeout(() => { const el = document.getElementById('regCode'); if(el) el.value = code; }, 80);
+}
+async function renderSolicitacoes() {
+  const { data } = await _sb.from('nave_requests').select('*').order('created_at', { ascending: false });
+  const reqs    = data || [];
+  const pending = reqs.filter(r => r.status === 'pending');
+  const rest    = reqs.filter(r => r.status !== 'pending');
+  const badge   = document.getElementById('badgeSolic');
+  if(badge) { badge.textContent = pending.length; badge.style.display = pending.length ? '' : 'none'; }
+  const el = document.getElementById('adminRequestList');
+  if(!el) return;
+  if(!reqs.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-ico">📭</div><p>Nenhuma solicitação ainda</p></div>';
+    return;
+  }
+  el.innerHTML = `
+    ${pending.length ? `<div style="font-size:11px;font-weight:700;color:var(--yellow);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">⏳ Pendentes (${pending.length})</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+      ${pending.map(r=>`
+        <div style="background:var(--bg3);border:1px solid var(--yellow);border-radius:8px;padding:12px 14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div>
+              <div style="font-size:13px;font-weight:600">${r.name} <span style="font-size:10px;color:var(--text3)">@${r.username}</span></div>
+              <div style="font-size:10px;color:var(--text3);margin-top:2px">${new Date(r.created_at).toLocaleString('pt-BR')}</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="aprovarSolicitacao(${r.id})">⚡ Gerar e enviar código</button>
+          </div>
+        </div>`).join('')}
+    </div>` : ''}
+    ${rest.length ? `<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Histórico</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${rest.map(r=>`
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:12px;font-weight:600">${r.name} <span style="font-size:10px;color:var(--text3)">@${r.username}</span></div>
+            <div style="font-size:10px;color:var(--text3)">${new Date(r.created_at).toLocaleString('pt-BR')}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            ${r.status==='approved'?`<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent2);font-weight:700">${r.code}</span><span class="badge badge-accent">Aguardando uso</span>`:''}
+            ${r.status==='used'?'<span class="badge badge-green">✅ Cadastrado</span>':''}
+          </div>
+        </div>`).join('')}
+    </div>` : ''}`;
+}
+async function aprovarSolicitacao(id) {
+  const code = _randomCode();
+  const { error } = await _sb.from('nave_requests').update({ status:'approved', code }).eq('id', id);
+  if(error) { alert('Erro: ' + error.message); return; }
+  await renderSolicitacoes();
+  document.getElementById('accessCodeStatus').textContent = `✅ Código "${code}" gerado — o corretor pode verificar agora!`;
+}
 async function renderAdminUsers() {
   const users = await getUsers();
   document.getElementById('adminUserList').innerHTML = `
