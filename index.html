@@ -31,8 +31,33 @@
   --radius:   10px;
   --radius2:  6px;
 }
+/* ── TEMA CLARO ── */
+body.light {
+  --bg:       #F0F2F8;
+  --bg2:      #FFFFFF;
+  --bg3:      #E4E8F4;
+  --bg4:      #D8DDEF;
+  --border:   #C4CAE0;
+  --border2:  #ACB4D0;
+  --text1:    #1A1D2E;
+  --text2:    #3D4460;
+  --text3:    #7880A0;
+  --accent:   #5850E8;
+  --accent2:  #4840D0;
+  --accentbg: rgba(88,80,232,.1);
+  --green:    #16A34A;
+  --greenbg:  rgba(22,163,74,.12);
+  --yellow:   #B45309;
+  --yellowbg: rgba(180,83,9,.1);
+  --red:      #DC2626;
+  --redbg:    rgba(220,38,38,.1);
+  --blue:     #1D4ED8;
+  --bluebg:   rgba(29,78,216,.1);
+}
+body.light .form-select option { background: #fff; color: #1A1D2E; }
+
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text1);min-height:100vh;display:flex}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text1);min-height:100vh;display:flex;transition:background .2s,color .2s}
 
 /* ── SIDEBAR ── */
 .sidebar{width:220px;min-height:100vh;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;z-index:100}
@@ -463,6 +488,18 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
       <button class="modal-close" onclick="closeConfig()">✕</button>
     </div>
     <div class="modal-body">
+      <div style="background:var(--bg3);border-radius:10px;padding:16px;margin-bottom:20px">
+        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px">🎨 Aparência</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text1)" id="themeLabelText">Modo Escuro</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">Alterne entre claro e escuro</div>
+          </div>
+          <button id="themeToggleBtn" onclick="toggleTheme()" style="width:52px;height:28px;border-radius:14px;border:none;cursor:pointer;position:relative;transition:background .2s;background:var(--accent);flex-shrink:0">
+            <span id="themeToggleKnob" style="position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:transform .2s;display:flex;align-items:center;justify-content:center;font-size:12px">🌙</span>
+          </button>
+        </div>
+      </div>
       <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:14px">🔒 Alterar senha</div>
       <div class="form-group"><label class="form-label">Senha atual</label>
         <input class="form-input" type="password" id="cfgSenhaAtual" placeholder="Sua senha atual">
@@ -1011,6 +1048,7 @@ async function ensureAdmin() {
   }
 }
 async function initAuth() {
+  applyTheme(localStorage.getItem('nave_theme') || 'dark');
   showLoading('Iniciando...');
   try {
     await ensureAdmin();
@@ -1131,6 +1169,22 @@ function openConfig() {
   document.getElementById('configPanel').classList.add('open');
 }
 function closeConfig() { document.getElementById('configPanel').classList.remove('open'); }
+
+// ── Tema claro/escuro ──
+function applyTheme(theme) {
+  const isLight = theme === 'light';
+  document.body.classList.toggle('light', isLight);
+  const knob  = document.getElementById('themeToggleKnob');
+  const label = document.getElementById('themeLabelText');
+  if(knob)  { knob.textContent = isLight ? '☀️' : '🌙'; knob.style.transform = isLight ? 'translateX(24px)' : 'translateX(0)'; }
+  if(label) label.textContent  = isLight ? 'Modo Claro' : 'Modo Escuro';
+}
+function toggleTheme() {
+  const isNowLight = !document.body.classList.contains('light');
+  const theme = isNowLight ? 'light' : 'dark';
+  localStorage.setItem('nave_theme', theme);
+  applyTheme(theme);
+}
 async function salvarNovaSenha() {
   if(!currentUser) return;
   const atual = document.getElementById('cfgSenhaAtual').value;
