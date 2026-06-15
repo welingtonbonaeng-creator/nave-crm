@@ -809,7 +809,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Origem</label>
-          <select class="form-select" id="lOrigem">
+          <select class="form-select" id="lOrigem" onchange="document.getElementById('lOrigemOutros').style.display=this.value==='outros'?'block':'none'">
             <option value="CV-CRM">CV-CRM</option>
             <option value="Instagram">Instagram</option>
             <option value="Facebook">Facebook</option>
@@ -821,7 +821,9 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
             <option value="Indicação">Indicação</option>
             <option value="OLX">OLX</option>
             <option value="Espontaneo">Espontâneo</option>
+            <option value="outros">Outros...</option>
           </select>
+          <input class="form-input" id="lOrigemOutros" placeholder="Especifique a origem..." style="display:none;margin-top:6px" maxlength="60">
         </div>
         <div class="form-group"><label class="form-label">Etapa</label>
           <select class="form-select" id="lEtapa">
@@ -2399,9 +2401,16 @@ function verLead(id) {
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Produto de interesse</label><input class="form-input" id="dImovel" value="${l.imovel||''}" placeholder="Ex: Torre A — Apto 2q"></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Valor estimado</label><input class="form-input" id="dValor" value="${l.valor ? fi(l.valor) : ''}" placeholder="R$ 0,00" oninput="maskBRL(this)" style="color:var(--green);font-family:'JetBrains Mono',monospace"></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Origem</label>
-        <select class="form-select" id="dOrigem">
-          ${['CV-CRM','Instagram','Facebook','Campanha','Lead GG','Lead Super','Lead Frio','Lead Gerente','Indicação','OLX','Espontaneo'].map(o=>`<option value="${o}" ${l.origem===o?'selected':''}>${o}</option>`).join('')}
-        </select>
+        ${(()=>{
+          const lista = ['CV-CRM','Instagram','Facebook','Campanha','Lead GG','Lead Super','Lead Frio','Lead Gerente','Indicação','OLX','Espontaneo'];
+          const custom = l.origem && !lista.includes(l.origem) ? l.origem : '';
+          const sel    = custom ? 'outros' : (l.origem || 'CV-CRM');
+          return `<select class="form-select" id="dOrigem" onchange="document.getElementById('dOrigemOutros').style.display=this.value==='outros'?'block':'none'">
+            ${lista.map(o=>`<option value="${o}" ${sel===o?'selected':''}>${o}</option>`).join('')}
+            <option value="outros" ${sel==='outros'?'selected':''}>Outros...</option>
+          </select>
+          <input class="form-input" id="dOrigemOutros" value="${custom}" placeholder="Especifique a origem..." style="display:${custom?'block':'none'};margin-top:6px" maxlength="60">`;
+        })()}
       </div>
     </div>
     <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:14px">
@@ -2505,7 +2514,7 @@ function salvarEdicaoLead(id) {
   l.renda  = document.getElementById('dRenda')?.value.trim()  || l.renda;
   l.regiao = document.getElementById('dRegiao')?.value        || l.regiao;
   l.imovel = document.getElementById('dImovel')?.value.trim() || l.imovel;
-  l.origem = document.getElementById('dOrigem')?.value        || l.origem;
+  l.origem = (()=>{ const v=document.getElementById('dOrigem')?.value; return v==='outros'?(document.getElementById('dOrigemOutros')?.value.trim()||'Outros'):v; })() || l.origem;
   l.obs    = document.getElementById('dObs')?.value.trim();
   const novoValor = parseBRL(document.getElementById('dValor')?.value || '');
   if(novoValor > 0) l.valor = novoValor;
@@ -2837,7 +2846,7 @@ function salvarLead() {
     regiao: document.getElementById('lRegiao').value,
     imovel: document.getElementById('lImovel').value,
     valor: 0, ato, fgts: fgtsSim, fgtsValor: fgtsVal, fgtsAnos: 0,
-    origem: document.getElementById('lOrigem').value,
+    origem: (()=>{ const v=document.getElementById('lOrigem').value; return v==='outros'?(document.getElementById('lOrigemOutros').value.trim()||'Outros'):v; })(),
     etapa:  document.getElementById('lEtapa').value,
     obs:    document.getElementById('lObs').value,
     data:   hoje()
