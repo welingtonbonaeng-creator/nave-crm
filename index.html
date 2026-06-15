@@ -2501,13 +2501,19 @@ function verLead(id) {
 
     ${l.historico && l.historico.length ? `
     <div style="margin-top:4px">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;padding-top:10px;border-top:1px solid var(--border)">📋 Histórico de movimentações</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-top:10px;border-top:1px solid var(--border);margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">📋 Histórico de movimentações</div>
+        <button onclick="limparHistorico(${l.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px" title="Apagar todo o histórico">🗑️ Limpar tudo</button>
+      </div>
       <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto">
-        ${[...l.historico].reverse().map(h=>`
+        ${[...l.historico].reverse().map((h,i)=>`
           <div style="background:var(--bg3);border-radius:6px;padding:8px 10px;font-size:11px;border-left:3px solid var(--accent)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
               <span><span class="tag ${ETAPA_TAG[h.de]}">${ETAPA_LABEL[h.de]}</span> → <span class="tag ${ETAPA_TAG[h.para]}">${ETAPA_LABEL[h.para]}</span></span>
-              <span style="font-size:10px;color:var(--text3)">${h.dataHora}</span>
+              <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+                <span style="font-size:10px;color:var(--text3)">${h.dataHora}</span>
+                <button onclick="removerHistorico(${l.id},${l.historico.length-1-i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 2px;line-height:1" title="Remover esta entrada">✕</button>
+              </div>
             </div>
             ${h.obs?'<div style="font-size:10px;color:var(--yellow);margin-top:2px">'+h.obs+'</div>':''}
           </div>`).join('')}
@@ -2660,6 +2666,22 @@ function removerTratativa(leadId, idx) {
     : '<div style="text-align:center;padding:16px;color:var(--text3);font-size:12px">Nenhuma tratativa registrada.</div>';
   }
   if(currentUser) scheduleSave();
+}
+
+function removerHistorico(leadId, idx) {
+  const l = state.leads.find(x=>x.id===leadId);
+  if(!l || !l.historico) return;
+  l.historico.splice(idx, 1);
+  scheduleSave();
+  verLead(leadId);
+}
+function limparHistorico(leadId) {
+  if(!confirm('Apagar todo o histórico de movimentações deste lead?')) return;
+  const l = state.leads.find(x=>x.id===leadId);
+  if(!l) return;
+  l.historico = [];
+  scheduleSave();
+  verLead(leadId);
 }
 
 // ── Agendamento de visita ──
