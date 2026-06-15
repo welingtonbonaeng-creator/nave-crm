@@ -157,6 +157,7 @@ nav{padding:14px 10px;flex:1}
 .cal-event.visita{background:var(--yellowbg);color:var(--yellow)}
 .cal-event.reuniao{background:var(--accentbg);color:var(--accent2)}
 .cal-event.ligacao{background:var(--bluebg);color:var(--blue)}
+.cal-event.retorno{background:var(--greenbg);color:var(--green)}
 .reminder-list{display:flex;flex-direction:column;gap:8px;max-height:500px;overflow-y:auto}
 .reminder-item{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius2);padding:12px;display:flex;gap:10px}
 .reminder-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px}
@@ -614,7 +615,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
               <button onclick="calNav(1)">›</button>
             </div>
             <div class="cal-month" id="calMonth"></div>
-            <button class="btn btn-primary btn-sm" onclick="openModal('modalEvento')">+ Evento</button>
+            <button class="btn btn-primary btn-sm" onclick="abrirNovoEvento()">+ Evento</button>
           </div>
           <div class="cal-grid" id="calGrid"></div>
         </div>
@@ -845,10 +846,11 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 <div class="modal-bg" id="modalEvento">
   <div class="modal">
     <div class="modal-head">
-      <div class="modal-title">Novo Evento</div>
+      <div class="modal-title" id="modalEventoTitulo">Novo Evento</div>
       <button class="modal-close" onclick="closeModal('modalEvento')">✕</button>
     </div>
     <div class="modal-body">
+      <input type="hidden" id="eEditId">
       <div class="form-group"><label class="form-label">Título</label><input class="form-input" id="eTitulo" placeholder="Visita — João Silva"></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Data</label><input class="form-input" id="eData" type="date"></div>
@@ -857,7 +859,10 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
       <div class="form-row">
         <div class="form-group"><label class="form-label">Tipo</label>
           <select class="form-select" id="eTipo">
-            <option value="visita">Visita</option><option value="reuniao">Reunião</option><option value="ligacao">Ligação</option>
+            <option value="visita">🏠 Visita</option>
+            <option value="reuniao">🤝 Reunião</option>
+            <option value="ligacao">📞 Ligação</option>
+            <option value="retorno">📲 Retorno de Contato</option>
           </select>
         </div>
         <div class="form-group"><label class="form-label">Cliente</label><input class="form-input" id="eCliente" placeholder="Nome do cliente"></div>
@@ -866,7 +871,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modalEvento')">Cancelar</button>
-      <button class="btn btn-primary" onclick="salvarEvento()">Salvar evento</button>
+      <button class="btn btn-primary" id="btnSalvarEvento" onclick="salvarEvento()">Salvar evento</button>
     </div>
   </div>
 </div>
@@ -1676,7 +1681,7 @@ function renderDashboard() {
   const prox = state.eventos.filter(e=>e.data>=hoje()).sort((a,b)=>a.data.localeCompare(b.data)).slice(0,4);
   document.getElementById('proximosComp').innerHTML = prox.length ? prox.map(e=>`
     <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-      <div style="width:38px;height:38px;background:var(--bg3);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">${e.tipo==='visita'?'🏠':e.tipo==='reuniao'?'🤝':'📞'}</div>
+      <div style="width:38px;height:38px;background:var(--bg3);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">${e.tipo==='visita'?'🏠':e.tipo==='reuniao'?'🤝':e.tipo==='retorno'?'📲':'📞'}</div>
       <div style="flex:1">
         <div style="font-size:12px;font-weight:600">${e.titulo}</div>
         <div style="font-size:11px;color:var(--text3)">${dateLabel(e.data)} às ${e.hora}</div>
@@ -1971,17 +1976,21 @@ function renderAgenda() {
   for(let d=1;d<=rem;d++) html += `<div class="cal-day other-month">${d}</div>`;
   document.getElementById('calGrid').innerHTML = html;
   const prox = state.eventos.filter(e=>e.data>=todayStr).sort((a,b)=>a.data.localeCompare(b.data));
-  const colors = { visita:'var(--yellow)', reuniao:'var(--accent2)', ligacao:'var(--blue)' };
+  const colors = { visita:'var(--yellow)', reuniao:'var(--accent2)', ligacao:'var(--blue)', retorno:'var(--green)' };
+  const tipoLabel = { visita:'🏠 Visita', reuniao:'🤝 Reunião', ligacao:'📞 Ligação', retorno:'📲 Retorno' };
   document.getElementById('reminderList').innerHTML = prox.length ? prox.map(e=>`
     <div class="reminder-item">
-      <div class="reminder-dot" style="background:${colors[e.tipo]}"></div>
-      <div class="reminder-info">
+      <div class="reminder-dot" style="background:${colors[e.tipo]||'var(--text3)'}"></div>
+      <div class="reminder-info" style="flex:1">
         <div class="r-title">${e.titulo}</div>
-        <div class="r-sub">👤 ${e.cliente}</div>
+        <div class="r-sub">👤 ${e.cliente||'—'} · <span style="color:${colors[e.tipo]||'var(--text3)'};font-weight:600;font-size:10px">${tipoLabel[e.tipo]||e.tipo}</span></div>
         <div class="r-time">📅 ${dateLabel(e.data)} · ⏰ ${e.hora}</div>
         ${e.notas?`<div style="font-size:10px;color:var(--text3);margin-top:3px">📝 ${e.notas}</div>`:''}
       </div>
-      <button class="btn btn-danger btn-sm" style="margin-left:auto;flex-shrink:0" onclick="delEvento(${e.id})">✕</button>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-left:8px;flex-shrink:0">
+        <button class="btn btn-ghost btn-sm" onclick="editarEvento(${e.id})" style="font-size:10px;padding:4px 8px">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="delEvento(${e.id})" style="font-size:10px;padding:4px 8px">✕</button>
+      </div>
     </div>`).join('') : '<div class="empty"><div class="empty-ico">🎉</div><p>Sem compromissos próximos</p></div>';
 }
 
@@ -2347,7 +2356,7 @@ function checkEventNotifications() {
   });
 }
 function showNotif(evento, tipo, key) {
-  const tipos = { visita:'🏠 Visita', reuniao:'🤝 Reunião', ligacao:'📞 Ligação' };
+  const tipos = { visita:'🏠 Visita', reuniao:'🤝 Reunião', ligacao:'📞 Ligação', retorno:'📲 Retorno' };
   const icon  = tipo === '2h' ? '🔔' : '⚠️';
   const titulo = tipo === '2h'
     ? `Em 2 horas: ${tipos[evento.tipo]||'Evento'}`
@@ -2843,21 +2852,56 @@ function salvarLead() {
 // ══════════════════════════════════════════════
 // SALVAR EVENTO
 // ══════════════════════════════════════════════
+function abrirNovoEvento() {
+  document.getElementById('eEditId').value = '';
+  document.getElementById('modalEventoTitulo').textContent = 'Novo Evento';
+  document.getElementById('btnSalvarEvento').textContent   = 'Salvar evento';
+  ['eTitulo','eCliente','eNotas'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('eData').value = '';
+  document.getElementById('eHora').value = '09:00';
+  document.getElementById('eTipo').value = 'visita';
+  openModal('modalEvento');
+}
+function editarEvento(id) {
+  const e = state.eventos.find(x=>x.id===id);
+  if(!e) return;
+  document.getElementById('eEditId').value              = id;
+  document.getElementById('modalEventoTitulo').textContent = 'Editar Evento';
+  document.getElementById('btnSalvarEvento').textContent   = 'Salvar alterações';
+  document.getElementById('eTitulo').value  = e.titulo  || '';
+  document.getElementById('eData').value    = e.data    || '';
+  document.getElementById('eHora').value    = e.hora    || '09:00';
+  document.getElementById('eTipo').value    = e.tipo    || 'visita';
+  document.getElementById('eCliente').value = e.cliente || '';
+  document.getElementById('eNotas').value   = e.notas   || '';
+  openModal('modalEvento');
+}
 function salvarEvento() {
   const titulo = document.getElementById('eTitulo').value.trim();
   const data   = document.getElementById('eData').value;
-  if(!titulo || !data) { alert('Preencha título e data'); return }
-  state.eventos.push({
-    id: state.nextId++, titulo, data,
-    hora:    document.getElementById('eHora').value,
-    tipo:    document.getElementById('eTipo').value,
-    cliente: document.getElementById('eCliente').value,
-    notas:   document.getElementById('eNotas').value
-  });
-  ['eTitulo','eData','eCliente','eNotas'].forEach(id=>document.getElementById(id).value='');
-  closeModal('modalEvento'); render();
+  if(!titulo || !data) { alert('Preencha título e data'); return; }
+  const editId = parseInt(document.getElementById('eEditId').value);
+  if(editId) {
+    const idx = state.eventos.findIndex(e=>e.id===editId);
+    if(idx > -1) {
+      state.eventos[idx] = { ...state.eventos[idx], titulo, data,
+        hora:    document.getElementById('eHora').value,
+        tipo:    document.getElementById('eTipo').value,
+        cliente: document.getElementById('eCliente').value,
+        notas:   document.getElementById('eNotas').value
+      };
+    }
+  } else {
+    state.eventos.push({ id: state.nextId++, titulo, data,
+      hora:    document.getElementById('eHora').value,
+      tipo:    document.getElementById('eTipo').value,
+      cliente: document.getElementById('eCliente').value,
+      notas:   document.getElementById('eNotas').value
+    });
+  }
+  closeModal('modalEvento'); render(); scheduleSave();
 }
-function delEvento(id) { state.eventos=state.eventos.filter(e=>e.id!==id); render(); }
+function delEvento(id) { state.eventos=state.eventos.filter(e=>e.id!==id); render(); scheduleSave(); }
 
 // ══════════════════════════════════════════════
 // TIPOLOGIAS
