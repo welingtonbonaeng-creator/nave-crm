@@ -1897,6 +1897,7 @@ function renderPipeline() {
               (ult ? '<div style="font-size:10px;color:var(--text3);margin-top:3px;padding:3px 6px;background:var(--bg4);border-radius:4px">↪ <span style="color:var(--text2)">'+ETAPA_LABEL[ult.para]+'</span> · '+ult.dataHora+(ult.obs?'<br><span style="color:var(--yellow)">'+ult.obs+'</span>':'')+'</div>' : '')+
               (l.motivoPerda&&l.etapa==='perdido'?'<div style="font-size:10px;color:var(--red);margin-top:2px">😔 '+l.motivoPerda+'</div>':'')+
               (l.motivoFuturo&&l.etapa==='futuro'?'<div style="font-size:10px;color:#A78BFA;margin-top:2px">🔮 '+l.motivoFuturo+'</div>':'')+
+              (l.futuroLembrete&&l.etapa==='futuro'?'<div style="font-size:10px;color:var(--yellow);margin-top:2px">⏰ Retornar em '+new Date(l.futuroLembrete+'T12:00').toLocaleDateString('pt-BR')+(l.futuroLembreteHora?' às '+l.futuroLembreteHora:'')+'</div>':'')+
               alertaHTML+
               '<div class="lead-meta"><div class="lead-val">'+fi(l.valor)+'</div><div class="lead-date">'+dateLabel(l.data)+'</div></div>'+
               '<div style="font-size:10px;color:var(--text3);margin-top:4px;display:flex;gap:8px;justify-content:space-between;align-items:center">'+
@@ -2395,6 +2396,35 @@ function confirmarNotif() {
 setInterval(checkEventNotifications, 60000);
 setTimeout(checkEventNotifications, 4000);
 
+// ── Lembretes Futuro ──
+const _futuroNotifSeen = new Set();
+function checkFuturoLembretes() {
+  if(!state || !state.leads) return;
+  const now = new Date();
+  state.leads.filter(l => l.etapa === 'futuro' && l.futuroLembrete).forEach(l => {
+    const hora = l.futuroLembreteHora || '09:00';
+    const dt   = new Date(`${l.futuroLembrete}T${hora}:00`);
+    const diffMin = (dt - now) / 60000;
+    const key = `futuro_${l.id}_${l.futuroLembrete}_${hora}`;
+    // Notificar quando passou (0 a -60 minutos = janela de 1 hora após o horário)
+    if(diffMin <= 0 && diffMin >= -60 && !_futuroNotifSeen.has(key)) {
+      _futuroNotifSeen.add(key);
+      showNotifFuturo(l, key);
+    }
+  });
+}
+function showNotifFuturo(lead, key) {
+  document.getElementById('notifIcon').textContent  = '🔮';
+  document.getElementById('notifTitle').textContent = '⏰ Lembrete de Retorno!';
+  document.getElementById('notifSub').innerHTML =
+    `<strong>${lead.nome}</strong><br>📌 ${lead.motivoFuturo||'Futuro'}<br>Hora de retornar o contato deste lead.` +
+    (lead.tel ? `<br><a href="${waLink(lead.tel)}" target="nave_whatsapp" style="color:#25D366;font-weight:700;text-decoration:none">📲 Abrir WhatsApp</a>` : '');
+  document.getElementById('notifOverlay').dataset.key = key;
+  document.getElementById('notifOverlay').classList.add('open');
+}
+setInterval(checkFuturoLembretes, 60000);
+setTimeout(checkFuturoLembretes, 6000);
+
 // ── WhatsApp ──
 function waLink(tel) {
   if(!tel) return null;
@@ -2475,6 +2505,12 @@ function verLead(id) {
       <div style="font-size:12px;font-weight:700;color:var(--yellow);margin-bottom:8px">📅 Agendar / Ver visita</div>
       ${l.visitaData ? `<div style="font-size:12px;color:var(--text1);margin-bottom:8px">✅ Visita agendada: <strong>${new Date(l.visitaData+'T12:00:00').toLocaleDateString('pt-BR')} às ${l.visitaHora}</strong></div>` : ''}
       <button class="btn btn-sm" style="background:var(--yellow);color:#000" onclick="abrirAgendamentoVisita(${l.id})">📅 ${l.visitaData?'Reagendar visita':'Agendar visita'}</button>
+    </div>` : ''}
+    ${l.etapa === 'futuro' && l.futuroLembrete ? `
+    <div style="background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.4);border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#A78BFA;margin-bottom:6px">⏰ Lembrete ativo</div>
+      <div style="font-size:12px;color:var(--text1)">Retornar em <strong>${new Date(l.futuroLembrete+'T12:00').toLocaleDateString('pt-BR')}</strong> às <strong>${l.futuroLembreteHora||'09:00'}</strong></div>
+      ${l.motivoFuturo ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">🔮 ${l.motivoFuturo}</div>` : ''}
     </div>` : ''}
     <div class="form-group">
       <label class="form-label">Observações gerais</label>
@@ -2845,9 +2881,12 @@ function abrirModalFuturo(l) {
   const box = document.createElement('div');
   box.id = 'futuroBox';
   box.style.cssText = 'background:rgba(139,92,246,.12);border:1px solid #A78BFA;border-radius:8px;padding:14px;margin-top:10px';
+  const lembDate = l.futuroLembrete     || '';
+  const lembHora = l.futuroLembreteHora || '09:00';
   box.innerHTML = `
-    <div style="font-size:12px;font-weight:700;color:#A78BFA;margin-bottom:10px">🔮 Motivo — Futuro — ${l.nome}</div>
+    <div style="font-size:12px;font-weight:700;color:#A78BFA;margin-bottom:10px">🔮 Futuro — ${l.nome}</div>
     <div class="form-group">
+      <label class="form-label">Motivo</label>
       <select class="form-select" id="vFuturoSelect" onchange="toggleFuturoOutro()">
         <option value="">Selecione o motivo</option>
         ${opcoes.map(o=>`<option value="${o}" ${selectVal===o?'selected':''}>${o}</option>`).join('')}
@@ -2856,7 +2895,21 @@ function abrirModalFuturo(l) {
     <div id="futuroOutroRow" class="form-group" style="display:${selectVal==='Outro'?'':'none'}">
       <textarea class="form-textarea" id="vFuturoOutro" placeholder="Explique o motivo..." style="min-height:60px">${outroVal}</textarea>
     </div>
-    <button class="btn btn-sm" style="width:100%;background:#7C3AED;color:#fff" onclick="confirmarFuturo(${l.id})">${motivoSalvo?'✏️ Atualizar motivo':'✅ Salvar motivo'}</button>`;
+    <div style="border-top:1px solid rgba(139,92,246,.3);padding-top:12px;margin-top:4px">
+      <div style="font-size:11px;font-weight:700;color:#A78BFA;margin-bottom:8px">⏰ Lembrete de retorno</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Data</label>
+          <input class="form-input" type="date" id="futuroLembDate" value="${lembDate}">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Horário</label>
+          <input class="form-input" type="time" id="futuroLembHora" value="${lembHora}">
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--text3);margin-bottom:10px">Você será notificado nesta data e horário para retornar o contato</div>
+    </div>
+    <button class="btn btn-sm" style="width:100%;background:#7C3AED;color:#fff" onclick="confirmarFuturo(${l.id})">${motivoSalvo?'✏️ Atualizar':'✅ Salvar lembrete'}</button>`;
   body.appendChild(box);
 }
 function toggleFuturoOutro() {
@@ -2872,6 +2925,11 @@ function confirmarFuturo(leadId) {
   const motivo = sel === 'Outro' ? (outro || '') : sel;
   if(!motivo) { alert('Selecione ou descreva o motivo para mover para Futuro'); return; }
   l.motivoFuturo = motivo;
+  const lembDate = document.getElementById('futuroLembDate')?.value || '';
+  const lembHora = document.getElementById('futuroLembHora')?.value || '';
+  l.futuroLembrete     = lembDate;
+  l.futuroLembreteHora = lembDate ? (lembHora || '09:00') : '';
+  if(lembDate) addHistorico(l, `⏰ Lembrete: retornar em ${new Date(lembDate+'T12:00').toLocaleDateString('pt-BR')} às ${l.futuroLembreteHora}`);
   closeModal('modalDetalhe'); render();
 }
 
