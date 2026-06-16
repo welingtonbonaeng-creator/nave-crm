@@ -309,6 +309,18 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
   .grid-2{grid-template-columns:1fr}
   .agenda-grid{grid-template-columns:1fr}
 }
+/* ── NOTA DO LEAD ── */
+.nota-btn{width:26px;height:26px;border-radius:5px;border:1.5px solid transparent;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;background:transparent}
+.nota-btn.red{background:var(--redbg);color:var(--red)}
+.nota-btn.yellow{background:var(--yellowbg);color:var(--yellow)}
+.nota-btn.green{background:var(--greenbg);color:var(--green)}
+.nota-btn.selected.red{border-color:var(--red);box-shadow:0 0 0 2px rgba(239,68,68,.3);transform:scale(1.15)}
+.nota-btn.selected.yellow{border-color:var(--yellow);box-shadow:0 0 0 2px rgba(245,158,11,.3);transform:scale(1.15)}
+.nota-btn.selected.green{border-color:var(--green);box-shadow:0 0 0 2px rgba(34,197,94,.3);transform:scale(1.15)}
+.nota-card{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px}
+.nota-card.red{background:var(--redbg);color:var(--red)}
+.nota-card.yellow{background:var(--yellowbg);color:var(--yellow)}
+.nota-card.green{background:var(--greenbg);color:var(--green)}
 </style>
 </head>
 <body>
@@ -833,6 +845,29 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
             <option value="negociacao">Negociação</option>
             <option value="futuro">Futuro</option>
           </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">⭐ Nota do lead (1–10 — chance de fechar rápido)</label>
+        <input type="hidden" id="lScore" value="">
+        <div class="nota-selector" style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;margin-top:4px">
+          <button type="button" class="nota-btn red" onclick="selecionarNota('lScore',1,this)">1</button>
+          <button type="button" class="nota-btn red" onclick="selecionarNota('lScore',2,this)">2</button>
+          <button type="button" class="nota-btn red" onclick="selecionarNota('lScore',3,this)">3</button>
+          <span style="display:inline-block;width:6px"></span>
+          <button type="button" class="nota-btn yellow" onclick="selecionarNota('lScore',4,this)">4</button>
+          <button type="button" class="nota-btn yellow" onclick="selecionarNota('lScore',5,this)">5</button>
+          <button type="button" class="nota-btn yellow" onclick="selecionarNota('lScore',6,this)">6</button>
+          <span style="display:inline-block;width:6px"></span>
+          <button type="button" class="nota-btn green" onclick="selecionarNota('lScore',7,this)">7</button>
+          <button type="button" class="nota-btn green" onclick="selecionarNota('lScore',8,this)">8</button>
+          <button type="button" class="nota-btn green" onclick="selecionarNota('lScore',9,this)">9</button>
+          <button type="button" class="nota-btn green" onclick="selecionarNota('lScore',10,this)">10</button>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:5px">
+          <span style="font-size:10px;color:var(--red)">● 1-3 Frio</span>
+          <span style="font-size:10px;color:var(--yellow)">● 4-6 Morno</span>
+          <span style="font-size:10px;color:var(--green)">● 7-10 Quente</span>
         </div>
       </div>
       <div class="form-group"><label class="form-label">Observações</label><textarea class="form-textarea" id="lObs" placeholder="Perfil, necessidades, urgência..."></textarea></div>
@@ -1522,6 +1557,21 @@ async function resetSenha(username) {
 }
 
 // ══════════════════════════════════════════════
+// NOTA DO LEAD
+// ══════════════════════════════════════════════
+function notaCor(n) {
+  if(!n || n < 1) return null;
+  return n <= 3 ? 'red' : n <= 6 ? 'yellow' : 'green';
+}
+function selecionarNota(id, val, btn) {
+  const el = document.getElementById(id);
+  if(el) el.value = val;
+  const container = btn.closest('.nota-selector');
+  if(container) container.querySelectorAll('.nota-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+
+// ══════════════════════════════════════════════
 // ESTADO
 // ══════════════════════════════════════════════
 let state = {
@@ -1899,6 +1949,7 @@ function renderPipeline() {
               (l.motivoFuturo&&l.etapa==='futuro'?'<div style="font-size:10px;color:#A78BFA;margin-top:2px">🔮 '+l.motivoFuturo+'</div>':'')+
               (l.futuroLembrete&&l.etapa==='futuro'?'<div style="font-size:10px;color:var(--yellow);margin-top:2px">⏰ Retornar em '+new Date(l.futuroLembrete+'T12:00').toLocaleDateString('pt-BR')+(l.futuroLembreteHora?' às '+l.futuroLembreteHora:'')+'</div>':'')+
               alertaHTML+
+              (l.score ? '<div style="margin:4px 0"><span class="nota-card '+notaCor(l.score)+'">⭐ '+l.score+'/10</span></div>' : '')+
               '<div class="lead-meta"><div class="lead-val">'+fi(l.valor)+'</div><div class="lead-date">'+dateLabel(l.data)+'</div></div>'+
               '<div style="font-size:10px;color:var(--text3);margin-top:4px;display:flex;gap:8px;justify-content:space-between;align-items:center">'+
               '<span>📍 '+(l.origem||'—')+'</span>'+
@@ -2479,6 +2530,22 @@ function verLead(id) {
       </div>
     </div>
     <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px">⭐ Nota do lead (chance de fechar rápido)</div>
+      <input type="hidden" id="dScore" value="${l.score||''}">
+      <div class="nota-selector" style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">
+        ${[1,2,3].map(n=>`<button type="button" class="nota-btn red${n==l.score?' selected':''}" onclick="selecionarNota('dScore',${n},this)">${n}</button>`).join('')}
+        <span style="display:inline-block;width:6px"></span>
+        ${[4,5,6].map(n=>`<button type="button" class="nota-btn yellow${n==l.score?' selected':''}" onclick="selecionarNota('dScore',${n},this)">${n}</button>`).join('')}
+        <span style="display:inline-block;width:6px"></span>
+        ${[7,8,9,10].map(n=>`<button type="button" class="nota-btn green${n==l.score?' selected':''}" onclick="selecionarNota('dScore',${n},this)">${n}</button>`).join('')}
+      </div>
+      <div style="display:flex;gap:12px;margin-top:5px">
+        <span style="font-size:10px;color:var(--red)">● 1-3 Frio</span>
+        <span style="font-size:10px;color:var(--yellow)">● 4-6 Morno</span>
+        <span style="font-size:10px;color:var(--green)">● 7-10 Quente</span>
+      </div>
+    </div>
+    <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:14px">
       <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px">💰 Financeiro</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
         <div class="form-group" style="margin-bottom:0"><label class="form-label">Valor do Ato (entrada)</label><input class="form-input" id="dAto" value="${l.ato > 0 ? fi(l.ato) : ''}" placeholder="R$ 0,00" oninput="maskBRL(this)" style="color:var(--yellow);font-family:'JetBrains Mono',monospace"></div>
@@ -2593,6 +2660,9 @@ function salvarEdicaoLead(id) {
   l.imovel = document.getElementById('dImovel')?.value.trim() || l.imovel;
   l.origem = (()=>{ const v=document.getElementById('dOrigem')?.value; return v==='outros'?(document.getElementById('dOrigemOutros')?.value.trim()||'Outros'):v; })() || l.origem;
   l.obs    = document.getElementById('dObs')?.value.trim();
+  const novaScore = parseInt(document.getElementById('dScore')?.value || '0');
+  if(novaScore >= 1 && novaScore <= 10) l.score = novaScore;
+  else l.score = 0;
   const novoValor = parseBRL(document.getElementById('dValor')?.value || '');
   if(novoValor > 0) l.valor = novoValor;
   const novoAto = parseBRL(document.getElementById('dAto')?.value || '');
@@ -2964,12 +3034,15 @@ function salvarLead() {
     origem: (()=>{ const v=document.getElementById('lOrigem').value; return v==='outros'?(document.getElementById('lOrigemOutros').value.trim()||'Outros'):v; })(),
     etapa:  document.getElementById('lEtapa').value,
     obs:    document.getElementById('lObs').value,
+    score:  parseInt(document.getElementById('lScore').value) || 0,
     data:   hoje()
   });
   ['lNome','lTel','lEmail','lRenda','lImovel','lAto','lFgtsValor','lObs'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('lRegiao').value='';
   document.getElementById('lFgtsPossui').value='nao';
   document.getElementById('fgtsValorRow').style.display='none';
+  document.getElementById('lScore').value='';
+  document.querySelectorAll('#modalLead .nota-btn').forEach(b=>b.classList.remove('selected'));
   closeModal('modalLead'); render();
 }
 
