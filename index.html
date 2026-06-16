@@ -1031,6 +1031,21 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
   </div>
 </div>
 
+<!-- Modal eventos do dia -->
+<div class="modal-bg" id="modalDia">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modalDiaTitulo">Eventos do dia</div>
+      <button class="modal-close" onclick="closeModal('modalDia')">✕</button>
+    </div>
+    <div class="modal-body" id="modalDiaBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modalDia');abrirNovoEvento()">+ Novo evento</button>
+      <button class="btn btn-ghost" onclick="closeModal('modalDia')">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal agendamento de visita -->
 <div class="modal-bg" id="modalVisita">
   <div class="modal">
@@ -1721,7 +1736,7 @@ function renderDashboard() {
   for(let i=5;i>=0;i--){
     const d = new Date(ano, mes-i, 1);
     const m2 = d.getMonth(), a2 = d.getFullYear();
-    const tot = state.vendas.filter(v=>{ const vd=new Date(v.data); return vd.getMonth()===m2 && vd.getFullYear()===a2 }).reduce((s,v)=>s+v.valor,0);
+    const tot = state.vendas.filter(v=>{ const vd=new Date(v.data); return vd.getMonth()===m2 && vd.getFullYear()===a2 && !v.cancelada }).reduce((s,v)=>s+v.valor,0);
     meses6.push({ label: d.toLocaleDateString('pt-BR',{month:'short'}), val: tot });
   }
   const maxV = Math.max(...meses6.map(m=>m.val), 1);
@@ -2036,7 +2051,7 @@ function renderAgenda() {
     const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const evts = state.eventos.filter(e=>e.data===dateStr);
     const isToday = dateStr === todayStr;
-    html += `<div class="cal-day${isToday?' today':''}${evts.length?' has-event':''}">
+    html += `<div class="cal-day${isToday?' today':''}${evts.length?' has-event':''}" onclick="verEventosDia('${dateStr}')" style="cursor:pointer">
       ${d}
       ${evts.map(e=>`<div class="cal-event ${e.tipo}">${e.hora} ${e.titulo.split('—')[0]}</div>`).join('')}
     </div>`;
@@ -2062,6 +2077,45 @@ function renderAgenda() {
         <button class="btn btn-danger btn-sm" onclick="delEvento(${e.id})" style="font-size:10px;padding:4px 8px">✕</button>
       </div>
     </div>`).join('') : '<div class="empty"><div class="empty-ico">🎉</div><p>Sem compromissos próximos</p></div>';
+}
+
+// ── Ver eventos de um dia específico ──
+function verEventosDia(dateStr) {
+  const dt = new Date(dateStr + 'T12:00:00');
+  const label = dt.toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long' });
+  document.getElementById('modalDiaTitulo').textContent = '📅 ' + label.charAt(0).toUpperCase() + label.slice(1);
+  const colors = { visita:'var(--yellow)', reuniao:'var(--accent2)', ligacao:'var(--blue)', retorno:'var(--green)' };
+  const tipoLabel = { visita:'🏠 Visita', reuniao:'🤝 Reunião', ligacao:'📞 Ligação', retorno:'📲 Retorno' };
+  const evts = state.eventos.filter(e => e.data === dateStr).sort((a,b) => a.hora.localeCompare(b.hora));
+  const body = document.getElementById('modalDiaBody');
+  if(!evts.length) {
+    body.innerHTML = '<div class="empty"><div class="empty-ico">📭</div><p>Nenhum evento neste dia</p></div>';
+  } else {
+    body.innerHTML = evts.map(e => `
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start">
+        <div style="width:40px;height:40px;border-radius:8px;background:var(--bg4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
+          ${{visita:'🏠',reuniao:'🤝',ligacao:'📞',retorno:'📲'}[e.tipo]||'📅'}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;color:var(--text1)">${e.titulo}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">👤 ${e.cliente||'—'} · <span style="color:${colors[e.tipo]||'var(--text3)'};font-weight:600">${tipoLabel[e.tipo]||e.tipo}</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">⏰ ${e.hora}</div>
+          ${e.notas ? `<div style="font-size:11px;color:var(--text3);margin-top:3px">📝 ${e.notas}</div>` : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+          <button class="btn btn-ghost btn-sm" onclick="closeModal('modalDia');editarEvento(${e.id})" style="font-size:10px;padding:4px 8px">✏️ Editar</button>
+          <button class="btn btn-sm" onclick="delEventoDia(${e.id},'${dateStr}')" style="background:var(--redbg);color:var(--red);border:1px solid var(--redbg);font-size:10px;padding:4px 8px">✕ Excluir</button>
+        </div>
+      </div>`).join('');
+  }
+  openModal('modalDia');
+}
+function delEventoDia(id, dateStr) {
+  if(!confirm('Excluir este evento?')) return;
+  state.eventos = state.eventos.filter(e => e.id !== id);
+  if(currentUser) scheduleSave();
+  renderAgenda();
+  verEventosDia(dateStr);
 }
 
 // ── Imóveis ──
@@ -2404,48 +2458,59 @@ function checkAlertasPipeline() {
 setInterval(checkAlertasPipeline, 60 * 60 * 1000);
 
 // ══════════════════════════════════════════════
-// NOTIFICAÇÕES DE AGENDA (2h + 30min antes)
+// NOTIFICAÇÕES DE AGENDA (2h / 1h / 30min / 10min / na hora)
 // ══════════════════════════════════════════════
 const _notifSeenKeys = new Set();
+const _notifQueue    = [];
+let   _notifShowing  = false;
+
+const NOTIF_SLOTS = [
+  { key:'2h',   min:120, label:'Em 2 horas',    icon:'🔔' },
+  { key:'1h',   min:60,  label:'Em 1 hora',     icon:'🔔' },
+  { key:'30m',  min:30,  label:'Em 30 minutos', icon:'⚠️' },
+  { key:'10m',  min:10,  label:'Em 10 minutos', icon:'⚠️' },
+  { key:'0m',   min:0,   label:'Agora!',         icon:'🚨' },
+];
+
 function checkEventNotifications() {
+  if(!currentUser || !state.eventos) return;
   const now = new Date();
   state.eventos.forEach(e => {
     const evDate = new Date(e.data + 'T' + (e.hora||'00:00') + ':00');
     const diffMin = (evDate - now) / 60000;
-
-    // 2 horas antes (janela: 115–125 min)
-    const key2h = `2h-${e.id}`;
-    if(diffMin >= 115 && diffMin <= 125 && !_notifSeenKeys.has(key2h)) {
-      showNotif(e, '2h', key2h);
-    }
-    // 30 minutos antes (janela: 25–35 min)
-    const key30 = `30m-${e.id}`;
-    if(diffMin >= 25 && diffMin <= 35 && !_notifSeenKeys.has(key30)) {
-      showNotif(e, '30m', key30);
-    }
+    NOTIF_SLOTS.forEach(slot => {
+      const nk = `${slot.key}-${e.id}`;
+      // Janela de ±4 min ao redor do alvo (cobre 30s de intervalo com folga)
+      if(diffMin >= slot.min - 4 && diffMin <= slot.min + 4 && !_notifSeenKeys.has(nk)) {
+        _notifSeenKeys.add(nk);
+        _notifQueue.push({ evento: e, slot });
+        drainNotifQueue();
+      }
+    });
   });
 }
-function showNotif(evento, tipo, key) {
+
+function drainNotifQueue() {
+  if(_notifShowing || !_notifQueue.length) return;
+  const { evento, slot } = _notifQueue.shift();
   const tipos = { visita:'🏠 Visita', reuniao:'🤝 Reunião', ligacao:'📞 Ligação', retorno:'📲 Retorno' };
-  const icon  = tipo === '2h' ? '🔔' : '⚠️';
-  const titulo = tipo === '2h'
-    ? `Em 2 horas: ${tipos[evento.tipo]||'Evento'}`
-    : `⚠️ Em 30 minutos: ${tipos[evento.tipo]||'Evento'}`;
-  document.getElementById('notifIcon').textContent  = icon;
-  document.getElementById('notifTitle').textContent = titulo;
+  document.getElementById('notifIcon').textContent  = slot.icon;
+  document.getElementById('notifTitle').textContent = `${slot.label}: ${tipos[evento.tipo]||'Evento'}`;
   document.getElementById('notifSub').innerHTML =
-    `<strong>${evento.titulo}</strong><br>👤 ${evento.cliente}<br>📅 ${dateLabel(evento.data)} às ⏰ ${evento.hora}` +
+    `<strong>${evento.titulo}</strong><br>👤 ${evento.cliente||'—'}<br>📅 ${dateLabel(evento.data)} às ⏰ ${evento.hora}` +
     (evento.notas ? `<br><span style="font-size:11px;color:var(--text3)">📝 ${evento.notas}</span>` : '');
-  document.getElementById('notifOverlay').dataset.key = key;
   document.getElementById('notifOverlay').classList.add('open');
+  _notifShowing = true;
 }
+
 function confirmarNotif() {
-  const key = document.getElementById('notifOverlay').dataset.key;
-  if(key) _notifSeenKeys.add(key);
   document.getElementById('notifOverlay').classList.remove('open');
+  _notifShowing = false;
+  // Mostra próxima da fila após 800ms
+  setTimeout(drainNotifQueue, 800);
 }
-setInterval(checkEventNotifications, 60000);
-setTimeout(checkEventNotifications, 4000);
+setInterval(checkEventNotifications, 30000);
+setTimeout(checkEventNotifications, 6000);
 
 // ── Lembretes Futuro ──
 const _futuroNotifSeen = new Set();
@@ -3238,6 +3303,8 @@ function verImovel(id) {
   const [cls,lbl] = STATUS_OBRA[im.statusObra||'lancamento'];
   const prazo = im.dataEntrega ? calcMesesLabel(im.dataEntrega) : '';
   document.getElementById('detalheNome').textContent = im.nome;
+  const btnWa = document.getElementById('btnWaDetalhe');
+  if(btnWa) btnWa.style.display = 'none';
   document.getElementById('detalheBody').innerHTML = `
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
       <span class="badge ${cls}">${lbl}</span>
