@@ -190,6 +190,20 @@ nav{padding:14px 10px;flex:1}
 .lead-card.dragging{opacity:.4;transform:scale(.97)}
 .pipe-body.drag-over{background:var(--accentbg);border-radius:var(--radius2)}
 
+/* ── PAINEL DE METAS ── */
+.metas-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.metas-hero-main{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:16px}
+.metas-kpi{text-align:center}
+.metas-kpi-label{font-size:10px;font-weight:600;letter-spacing:.5px;color:var(--text3);text-transform:uppercase;margin-bottom:6px}
+.metas-kpi-val{font-size:26px;font-weight:700;font-family:'JetBrains Mono',monospace;letter-spacing:-1px;margin-bottom:3px}
+.metas-kpi-sub{font-size:11px;color:var(--text3)}
+.metas-progress-wrap{padding-top:14px}
+.metas-progress-bar{height:10px;background:var(--bg3);border-radius:5px;overflow:hidden}
+.metas-progress-fill{height:100%;border-radius:5px;transition:width .4s ease}
+.metas-form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.metas-insight{background:var(--bg3);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;padding:10px 12px;font-size:12px;line-height:1.5;color:var(--text2)}
+@media(max-width:900px){.metas-hero-main{grid-template-columns:repeat(2,1fr)}.metas-form-grid{grid-template-columns:repeat(2,1fr)}}
+
 /* ── NOTIFICATION ── */
 .notif-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center}
 .notif-overlay.open{display:flex}
@@ -548,6 +562,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
     <div class="nav-item" onclick="showPage('imoveis')"><span class="ico">🏢</span><span>Imóveis</span></div>
     <div class="nav-section">Relatórios</div>
     <div class="nav-item" onclick="showPage('vendas')"><span class="ico">💰</span><span>Vendas</span></div>
+    <div class="nav-item" id="navMetas" style="display:none" onclick="showPage('metas')"><span class="ico">🎯</span><span>Painel de Metas</span></div>
   </nav>
   <div class="sidebar-footer">
     <div class="user-row" style="margin-bottom:8px">
@@ -679,6 +694,10 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
           <div id="comissoesList"></div>
         </div>
       </div>
+    </div>
+
+    <div class="page" id="pageMetas">
+      <div id="metasContent"></div>
     </div>
 
   </div>
@@ -1212,6 +1231,8 @@ function loginSuccess(user) {
   document.getElementById('sideRole').textContent   = user.role === 'admin' ? 'Admin' : 'Corretor';
   if(user.role === 'admin') document.getElementById('btnAdmin').style.display = 'flex';
   else document.getElementById('btnAdmin').style.display = 'none';
+  const _isWell = user.name.toLowerCase().includes('welington');
+  document.getElementById('navMetas').style.display = _isWell ? 'flex' : 'none';
   loadUserState(user.username);
   checkBirthday(user);
   checkDailyMotivation(user);
@@ -1679,6 +1700,7 @@ const PAGE_META = {
   agenda:    { title:'Agenda',     sub:'Compromissos e lembretes',      action:'<button class="btn btn-primary" onclick="openModal(\'modalEvento\')">+ Evento</button>' },
   imoveis:   { title:'Imóveis',    sub:'Carteira de empreendimentos',   action:'<button class="btn btn-primary" onclick="openModal(\'modalImovel\')">+ Imóvel</button>' },
   vendas:    { title:'Vendas',     sub:'Resultados e comissões',        action:'' },
+  metas:     { title:'Painel de Metas', sub:'Prospecção diária — meta de 1.000 contatos/mês', action:'' },
 };
 function showPage(p) {
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
@@ -1701,6 +1723,7 @@ function render() {
   try { renderAgenda(); } catch(e) { console.warn('renderAgenda',e); }
   try { renderImoveis(); } catch(e) { console.warn('renderImoveis',e); }
   try { renderVendas(); } catch(e) { console.warn('renderVendas',e); }
+  try { renderMetas(); } catch(e) { console.warn('renderMetas',e); }
   if(currentUser) scheduleSave();
 }
 function renderBadges() {
@@ -3492,6 +3515,278 @@ function delImovel(id) {
   if(!confirm('Remover este imóvel?')) return;
   state.imoveis = state.imoveis.filter(i=>i.id!==id);
   closeModal('modalDetalhe'); render();
+}
+
+// ══════════════════════════════════════════════
+// PAINEL DE METAS
+// ══════════════════════════════════════════════
+const METAS_CONFIG = {
+  total: 1000,
+  fontes: [
+    { id:'frios',     label:'Leads Frios',             meta:650 },
+    { id:'dayvisson', label:'Leads Quentes Dayvisson', meta:66  },
+    { id:'well',      label:'Leads Quentes Well',      meta:66  },
+    { id:'cv',        label:'CV',                      meta:110 },
+    { id:'olx',       label:'OLX',                     meta:108 },
+  ]
+};
+
+function _metasLoad() {
+  if(!currentUser) return { lancamentos:[] };
+  try { return JSON.parse(localStorage.getItem('nave_metas_'+currentUser.username) || '{"lancamentos":[]}'); }
+  catch(e) { return { lancamentos:[] }; }
+}
+function _metasSave(data) {
+  if(!currentUser) return;
+  localStorage.setItem('nave_metas_'+currentUser.username, JSON.stringify(data));
+}
+
+function renderMetas() {
+  const pg = document.getElementById('pageMetas');
+  if(!pg || !pg.classList.contains('active')) return;
+
+  const metasData  = _metasLoad();
+  const lancamentos = metasData.lancamentos || [];
+  const agora      = new Date();
+  const ano        = agora.getFullYear();
+  const mes        = agora.getMonth();
+  const diaAtual   = agora.getDate();
+  const diasNoMes  = new Date(ano, mes+1, 0).getDate();
+  const dataHoje   = hoje();
+
+  const doMes = lancamentos.filter(l => {
+    const d = new Date(l.data + 'T12:00:00');
+    return d.getFullYear()===ano && d.getMonth()===mes;
+  });
+  const lancHoje = doMes.find(l => l.data === dataHoje) || null;
+
+  // Totais por fonte
+  const totais = {};
+  METAS_CONFIG.fontes.forEach(f => {
+    totais[f.id] = doMes.reduce((s,l) => s+(l[f.id]||0), 0);
+  });
+  const totalRealizado = Object.values(totais).reduce((a,b)=>a+b, 0);
+  const pctTotal       = METAS_CONFIG.total > 0 ? totalRealizado/METAS_CONFIG.total*100 : 0;
+  const mediaAtual     = diaAtual > 0 ? totalRealizado/diaAtual : 0;
+  const mediaNecessaria = diasNoMes > 0 ? METAS_CONFIG.total/diasNoMes : 46;
+  const projecao       = Math.round(mediaAtual * diasNoMes);
+  const diferenca      = totalRealizado - METAS_CONFIG.total;
+
+  const cor   = p => p>=100 ? 'var(--green)' : p>=80 ? 'var(--yellow)' : 'var(--red)';
+  const badge = p => p>=100 ? '🟢' : p>=80 ? '🟡' : '🔴';
+
+  // Insights automáticos
+  const insights = [];
+  if(pctTotal >= 100) insights.push(`Você está ${(pctTotal-100).toFixed(1)}% acima da meta mensal.`);
+  else insights.push(`Você está ${(100-pctTotal).toFixed(1)}% abaixo da meta mensal — faltam ${Math.abs(diferenca)} contatos.`);
+  METAS_CONFIG.fontes.forEach(f => {
+    const pf = f.meta>0 ? totais[f.id]/f.meta*100 : 0;
+    const df = totais[f.id]-f.meta;
+    if(df < 0) insights.push(`${f.label} está abaixo da meta em ${Math.abs(df)} contatos.`);
+    else if(df > 0) insights.push(`${f.label} está acima da meta em ${df} contatos.`);
+  });
+  let gargalo = null, gargaloDiff = 0;
+  METAS_CONFIG.fontes.forEach(f => { const d=f.meta-totais[f.id]; if(d>gargaloDiff){gargaloDiff=d;gargalo=f;} });
+  if(gargalo && gargaloDiff > 0) insights.push(`${gargalo.label} é o principal gargalo do mês (faltam ${gargaloDiff} contatos).`);
+  insights.push(`Se continuar nesse ritmo, fechará o mês com ${projecao} contatos.`);
+
+  // Gráfico de barras (Meta vs Realizado)
+  const bW=54, bGap=14, bH=150, bPad=36;
+  const maxB = Math.max(...METAS_CONFIG.fontes.map(f=>Math.max(f.meta,totais[f.id]||0)),1);
+  const svgW  = METAS_CONFIG.fontes.length*(bW*2+bGap+16)+bPad*2;
+  let barSvg = `<svg width="100%" viewBox="0 0 ${svgW} ${bH+70}" style="display:block;overflow:visible">`;
+  METAS_CONFIG.fontes.forEach((f,i) => {
+    const x   = bPad + i*(bW*2+bGap+16);
+    const mH  = Math.max(2, Math.round(f.meta/(maxB)*bH));
+    const rH  = Math.max(2, Math.round((totais[f.id]||0)/(maxB)*bH));
+    const pf  = f.meta>0 ? (totais[f.id]||0)/f.meta*100 : 0;
+    const fc  = pf>=100?'#22C55E':pf>=80?'#F59E0B':'#EF4444';
+    barSvg += `
+      <rect x="${x}" y="${bH-mH+10}" width="${bW}" height="${mH}" fill="rgba(108,99,255,.3)" rx="3"/>
+      <text x="${x+bW/2}" y="${bH-mH+6}" text-anchor="middle" font-size="9" fill="#5C6280">${f.meta}</text>
+      <rect x="${x+bW+4}" y="${bH-rH+10}" width="${bW}" height="${rH}" fill="${fc}" rx="3"/>
+      <text x="${x+bW+4+bW/2}" y="${bH-rH+6}" text-anchor="middle" font-size="9" fill="#F0F2F8" font-weight="600">${totais[f.id]||0}</text>
+      <text x="${x+bW+2}" y="${bH+26}" text-anchor="middle" font-size="9" fill="#9AA0B8">${f.label.split(' ').pop()}</text>`;
+  });
+  barSvg += `<rect x="${bPad}" y="${bH+40}" width="10" height="8" fill="rgba(108,99,255,.3)" rx="1"/>
+    <text x="${bPad+14}" y="${bH+48}" font-size="9" fill="#9AA0B8">Meta</text>
+    <rect x="${bPad+52}" y="${bH+40}" width="10" height="8" fill="#22C55E" rx="1"/>
+    <text x="${bPad+66}" y="${bH+48}" font-size="9" fill="#9AA0B8">Realizado</text>
+  </svg>`;
+
+  // Gráfico de linha (evolução diária)
+  const diasKeys = [];
+  for(let i=1;i<=diaAtual;i++) {
+    diasKeys.push(`${ano}-${String(mes+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`);
+  }
+  const evolucao = diasKeys.map(d => {
+    const l = doMes.find(x=>x.data===d);
+    return l ? METAS_CONFIG.fontes.reduce((s,f)=>s+(l[f.id]||0),0) : 0;
+  });
+  const lW=560, lH=130, lPad=30;
+  const maxL = Math.max(...evolucao, mediaNecessaria, 1);
+  const px = (i) => evolucao.length>1 ? lPad+i*((lW-lPad*2)/(evolucao.length-1)) : lPad+(lW-lPad*2)/2;
+  const py = (v) => lPad + (lH-lPad)*(1-v/maxL);
+  const metaLineY = py(mediaNecessaria);
+  let lineSvg = `<svg width="100%" viewBox="0 0 ${lW} ${lH+46}" style="display:block;overflow:visible">`;
+  lineSvg += `<line x1="${lPad}" y1="${metaLineY}" x2="${lW-lPad}" y2="${metaLineY}" stroke="#6C63FF" stroke-width="1.5" stroke-dasharray="5,4" opacity=".7"/>`;
+  lineSvg += `<text x="${lW-lPad+4}" y="${metaLineY+4}" font-size="9" fill="#6C63FF">Meta ${Math.round(mediaNecessaria)}/dia</text>`;
+  if(evolucao.length >= 1) {
+    const pts = evolucao.map((v,i)=>`${px(i)},${py(v)}`).join(' ');
+    if(evolucao.length>1) lineSvg += `<polyline points="${pts}" fill="none" stroke="#22C55E" stroke-width="2" stroke-linejoin="round"/>`;
+    evolucao.forEach((v,i)=>{
+      lineSvg += `<circle cx="${px(i)}" cy="${py(v)}" r="3.5" fill="#22C55E"/>`;
+      if(i===0||i===evolucao.length-1||v>0)
+        lineSvg += `<text x="${px(i)}" y="${py(v)-8}" text-anchor="middle" font-size="9" fill="#9AA0B8">${v}</text>`;
+    });
+  }
+  [0, Math.floor((diasKeys.length-1)/2), diasKeys.length-1].filter((v,i,a)=>a.indexOf(v)===i && v>=0 && v<diasKeys.length).forEach(i=>{
+    lineSvg += `<text x="${px(i)}" y="${lH+14}" text-anchor="middle" font-size="9" fill="#5C6280">Dia ${i+1}</text>`;
+  });
+  lineSvg += `<rect x="${lPad}" y="${lH+28}" width="10" height="2" fill="#22C55E" rx="1"/>
+    <text x="${lPad+14}" y="${lH+34}" font-size="9" fill="#9AA0B8">Realizado</text>
+    <line x1="${lPad+70}" y1="${lH+29}" x2="${lPad+80}" y2="${lH+29}" stroke="#6C63FF" stroke-dasharray="3,2" stroke-width="1.5"/>
+    <text x="${lPad+84}" y="${lH+34}" font-size="9" fill="#9AA0B8">Meta/dia</text>
+  </svg>`;
+
+  // Nome do mês
+  const nomeMes = agora.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+
+  document.getElementById('metasContent').innerHTML = `
+    <!-- Hero principal -->
+    <div class="metas-hero">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">${nomeMes}</div>
+        <div style="font-size:11px;color:var(--text3)">Dia ${diaAtual} de ${diasNoMes}</div>
+      </div>
+      <div class="metas-hero-main">
+        <div class="metas-kpi">
+          <div class="metas-kpi-label">Realizado no mês</div>
+          <div class="metas-kpi-val" style="color:${cor(pctTotal)}">${totalRealizado.toLocaleString('pt-BR')}</div>
+          <div class="metas-kpi-sub">de 1.000 contatos</div>
+        </div>
+        <div class="metas-kpi">
+          <div class="metas-kpi-label">Atingimento</div>
+          <div class="metas-kpi-val" style="color:${cor(pctTotal)}">${pctTotal.toFixed(1)}%</div>
+          <div class="metas-kpi-sub">${badge(pctTotal)} ${diferenca>=0?'+'+diferenca+' acima':Math.abs(diferenca)+' faltando'}</div>
+        </div>
+        <div class="metas-kpi">
+          <div class="metas-kpi-label">Projeção do mês</div>
+          <div class="metas-kpi-val" style="color:${cor(projecao/METAS_CONFIG.total*100)}">${projecao.toLocaleString('pt-BR')}</div>
+          <div class="metas-kpi-sub">contatos estimados</div>
+        </div>
+        <div class="metas-kpi">
+          <div class="metas-kpi-label">Média atual / necessária</div>
+          <div class="metas-kpi-val" style="font-size:20px;color:${cor(mediaAtual/mediaNecessaria*100)}">${mediaAtual.toFixed(1)}<span style="color:var(--text3);font-size:13px"> / ${mediaNecessaria.toFixed(1)}</span></div>
+          <div class="metas-kpi-sub">contatos por dia</div>
+        </div>
+      </div>
+      <div class="metas-progress-wrap">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-bottom:5px">
+          <span>0</span><span style="color:${cor(pctTotal)};font-weight:700">${pctTotal.toFixed(1)}%</span><span>1.000</span>
+        </div>
+        <div class="metas-progress-bar">
+          <div class="metas-progress-fill" style="width:${Math.min(pctTotal,100)}%;background:${cor(pctTotal)}"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabela + Insights -->
+    <div class="grid-2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">Desempenho por fonte</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Fonte</th><th style="text-align:right">Meta/mês</th><th style="text-align:right">Meta/dia</th>
+              <th style="text-align:right">Hoje</th><th style="text-align:right">Mês</th>
+              <th style="text-align:right">Dif.</th><th>Progresso</th>
+            </tr></thead>
+            <tbody>
+            ${METAS_CONFIG.fontes.map(f=>{
+              const real = totais[f.id]||0;
+              const pf   = f.meta>0 ? real/f.meta*100 : 0;
+              const df   = real-f.meta;
+              const mDia = (f.meta/diasNoMes).toFixed(1);
+              const rHj  = lancHoje ? (lancHoje[f.id]||0) : 0;
+              return `<tr>
+                <td style="font-weight:600">${badge(pf)} ${f.label}</td>
+                <td style="text-align:right;font-family:monospace;color:var(--text2)">${f.meta}</td>
+                <td style="text-align:right;font-family:monospace;color:var(--text3)">${mDia}</td>
+                <td style="text-align:right;font-family:monospace;color:var(--accent2);font-weight:600">${rHj}</td>
+                <td style="text-align:right;font-family:monospace;font-weight:700">${real}</td>
+                <td style="text-align:right;font-family:monospace;color:${df>=0?'var(--green)':'var(--red)'};font-weight:600">${df>=0?'+'+df:df}</td>
+                <td style="min-width:110px">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">
+                      <div style="width:${Math.min(pf,100)}%;height:100%;background:${cor(pf)};border-radius:3px"></div>
+                    </div>
+                    <span style="font-size:11px;color:${cor(pf)};font-weight:700;min-width:36px">${pf.toFixed(0)}%</span>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Resumo inteligente</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${insights.map(i=>`<div class="metas-insight">${i}</div>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <!-- Gráficos -->
+    <div class="grid-2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">Meta vs Realizado — por fonte</div>
+        ${barSvg}
+      </div>
+      <div class="card">
+        <div class="card-title">Evolução diária de contatos</div>
+        ${lineSvg}
+      </div>
+    </div>
+
+    <!-- Lançamento diário -->
+    <div class="card" style="max-width:620px">
+      <div class="card-title">
+        Lançamento diário
+        <span style="font-size:11px;font-weight:400;color:var(--text3)">
+          ${lancHoje ? '✅ já lançado hoje — edite se precisar corrigir' : '⏳ ainda não lançado hoje'}
+        </span>
+      </div>
+      <div class="metas-form-grid">
+        ${METAS_CONFIG.fontes.map(f=>`
+          <div class="form-group">
+            <label class="form-label">${f.label}</label>
+            <input class="form-input" type="number" min="0" id="mInp_${f.id}"
+              value="${lancHoje ? (lancHoje[f.id]||0) : 0}" placeholder="0">
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:14px" onclick="salvarLancamentoMetas()">
+        💾 Salvar lançamento de hoje
+      </button>
+    </div>
+  `;
+}
+
+function salvarLancamentoMetas() {
+  const metasData = _metasLoad();
+  if(!Array.isArray(metasData.lancamentos)) metasData.lancamentos = [];
+  const dataHoje = hoje();
+  const lancamento = { data: dataHoje };
+  METAS_CONFIG.fontes.forEach(f => {
+    lancamento[f.id] = parseInt(document.getElementById('mInp_'+f.id)?.value||'0')||0;
+  });
+  const idx = metasData.lancamentos.findIndex(l => l.data === dataHoje);
+  if(idx >= 0) metasData.lancamentos[idx] = lancamento;
+  else metasData.lancamentos.push(lancamento);
+  _metasSave(metasData);
+  renderMetas();
 }
 
 // ══════════════════════════════════════════════
