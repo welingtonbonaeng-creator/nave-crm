@@ -1231,7 +1231,7 @@ function loginSuccess(user) {
   document.getElementById('sideRole').textContent   = user.role === 'admin' ? 'Admin' : 'Corretor';
   if(user.role === 'admin') document.getElementById('btnAdmin').style.display = 'flex';
   else document.getElementById('btnAdmin').style.display = 'none';
-  const _isWell = user.username === 'well@simulador.com' || user.name.toLowerCase().includes('welington');
+  const _isWell = user.username === 'well' || user.username === 'well@simulador.com' || user.name.toLowerCase().includes('welington');
   document.getElementById('navMetas').style.display = _isWell ? 'flex' : 'none';
   loadUserState(user.username);
   checkBirthday(user);
