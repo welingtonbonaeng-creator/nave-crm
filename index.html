@@ -3520,7 +3520,7 @@ function delImovel(id) {
 // ══════════════════════════════════════════════
 // PAINEL DE METAS
 // ══════════════════════════════════════════════
-const METAS_CONFIG = {
+const METAS_DEFAULT = {
   total: 1000,
   fontes: [
     { id:'frios',     label:'Leads Frios',             meta:650 },
@@ -3532,20 +3532,59 @@ const METAS_CONFIG = {
 };
 
 function _metasLoad() {
-  if(!currentUser) return { lancamentos:[] };
+  if(!currentUser) return { lancamentos:[], config:null };
   try { return JSON.parse(localStorage.getItem('nave_metas_'+currentUser.username) || '{"lancamentos":[]}'); }
-  catch(e) { return { lancamentos:[] }; }
+  catch(e) { return { lancamentos:[], config:null }; }
 }
 function _metasSave(data) {
   if(!currentUser) return;
   localStorage.setItem('nave_metas_'+currentUser.username, JSON.stringify(data));
+}
+function _getMetasConfig(metasData) {
+  if(!metasData.config) return METAS_DEFAULT;
+  return {
+    total: metasData.config.total || METAS_DEFAULT.total,
+    fontes: METAS_DEFAULT.fontes.map(f => ({
+      ...f,
+      meta: metasData.config[f.id] !== undefined ? metasData.config[f.id] : f.meta
+    }))
+  };
+}
+
+function abrirEdicaoMetas() {
+  document.getElementById('metasEditPanel').style.display =
+    document.getElementById('metasEditPanel').style.display === 'none' ? 'block' : 'none';
+}
+
+function salvarConfigMetas() {
+  const metasData = _metasLoad();
+  const config = { total: 0 };
+  METAS_DEFAULT.fontes.forEach(f => {
+    const val = parseInt(document.getElementById('mCfg_'+f.id)?.value||'0')||0;
+    config[f.id] = val;
+    config.total += val;
+  });
+  metasData.config = config;
+  _metasSave(metasData);
+  document.getElementById('metasEditPanel').style.display = 'none';
+  renderMetas();
+}
+
+function restaurarMetasPadrao() {
+  if(!confirm('Restaurar as metas para os valores padrão?')) return;
+  const metasData = _metasLoad();
+  metasData.config = null;
+  _metasSave(metasData);
+  document.getElementById('metasEditPanel').style.display = 'none';
+  renderMetas();
 }
 
 function renderMetas() {
   const pg = document.getElementById('pageMetas');
   if(!pg || !pg.classList.contains('active')) return;
 
-  const metasData  = _metasLoad();
+  const metasData   = _metasLoad();
+  const METAS_CONFIG = _getMetasConfig(metasData);
   const lancamentos = metasData.lancamentos || [];
   const agora      = new Date();
   const ano        = agora.getFullYear();
@@ -3657,7 +3696,28 @@ function renderMetas() {
     <div class="metas-hero">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
         <div style="font-size:13px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">${nomeMes}</div>
-        <div style="font-size:11px;color:var(--text3)">Dia ${diaAtual} de ${diasNoMes}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:11px;color:var(--text3)">Dia ${diaAtual} de ${diasNoMes}</span>
+          <button class="btn btn-ghost btn-sm" onclick="abrirEdicaoMetas()">✏️ Editar metas</button>
+        </div>
+      </div>
+
+      <!-- Painel de edição de metas -->
+      <div id="metasEditPanel" style="display:none;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:16px;margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:12px;color:var(--text1)">Editar metas mensais</div>
+        <div class="metas-form-grid" style="margin-bottom:12px">
+          ${METAS_CONFIG.fontes.map(f=>`
+            <div class="form-group">
+              <label class="form-label">${f.label}</label>
+              <input class="form-input" type="number" min="0" id="mCfg_${f.id}" value="${f.meta}" placeholder="0">
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="salvarConfigMetas()">💾 Salvar metas</button>
+          <button class="btn btn-ghost btn-sm" onclick="restaurarMetasPadrao()">↩ Restaurar padrão</button>
+          <button class="btn btn-ghost btn-sm" onclick="abrirEdicaoMetas()" style="margin-left:auto">Cancelar</button>
+        </div>
       </div>
       <div class="metas-hero-main">
         <div class="metas-kpi">
