@@ -3767,7 +3767,7 @@ function renderMetas() {
               const real = totais[f.id]||0;
               const pf   = f.meta>0 ? real/f.meta*100 : 0;
               const df   = real-f.meta;
-              const mDia = (f.meta/diasNoMes).toFixed(1);
+              const mDia = Math.ceil(f.meta/diasNoMes);
               const rHj  = lancHoje ? (lancHoje[f.id]||0) : 0;
               return `<tr>
                 <td style="font-weight:600">${badge(pf)} ${f.label}</td>
