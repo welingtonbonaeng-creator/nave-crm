@@ -3738,15 +3738,42 @@ function renderMetas() {
       </div>
 
       <!-- Mini card OLX -->
-      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">OLX — Postagens</div>
-        <div style="font-size:13px;font-weight:700;color:${cor(pctOLX)}">${totalOLX} <span style="font-size:11px;font-weight:400;color:var(--text3)">de ${metaOLX} posts</span></div>
-        <div style="width:120px;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">
-          <div style="width:${Math.min(pctOLX,100)}%;height:100%;background:${cor(pctOLX)};border-radius:3px"></div>
-        </div>
-        <span style="font-size:11px;color:${cor(pctOLX)};font-weight:700">${badge(pctOLX)} ${pctOLX.toFixed(0)}%</span>
-        <span style="font-size:11px;color:var(--text3)">Meta/dia: ${Math.ceil(metaOLX/diasNoMes)} posts &nbsp;·&nbsp; Hoje: ${lancHoje?(lancHoje.olx||0):0}</span>
-      </div>
+      ${(()=>{
+        const totalChats = doMes.reduce((s,l)=>s+(l.olx_chats||0),0);
+        const chatsHoje  = lancHoje ? (lancHoje.olx_chats||0) : 0;
+        const convRate   = totalOLX>0 ? (totalChats/totalOLX*100) : 0;
+        return `<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">OLX — Postagens &amp; Conversão</div>
+          <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+            <div>
+              <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Postagens no mês</div>
+              <div style="font-size:18px;font-weight:700;color:${cor(pctOLX)};font-family:monospace">${totalOLX}<span style="font-size:12px;color:var(--text3);font-weight:400"> / ${metaOLX}</span></div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+                <div style="width:80px;height:5px;background:var(--bg3);border-radius:3px;overflow:hidden"><div style="width:${Math.min(pctOLX,100)}%;height:100%;background:${cor(pctOLX)};border-radius:3px"></div></div>
+                <span style="font-size:10px;color:${cor(pctOLX)};font-weight:700">${badge(pctOLX)} ${pctOLX.toFixed(0)}%</span>
+              </div>
+            </div>
+            <div style="width:1px;height:40px;background:var(--border)"></div>
+            <div>
+              <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Chats gerados no mês</div>
+              <div style="font-size:18px;font-weight:700;color:var(--blue);font-family:monospace">${totalChats}</div>
+              <div style="font-size:10px;color:var(--text3);margin-top:4px">Hoje: ${chatsHoje}</div>
+            </div>
+            <div style="width:1px;height:40px;background:var(--border)"></div>
+            <div>
+              <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Taxa de conversão</div>
+              <div style="font-size:18px;font-weight:700;color:${convRate>=20?'var(--green)':convRate>=10?'var(--yellow)':'var(--red)'};font-family:monospace">${convRate.toFixed(1)}%</div>
+              <div style="font-size:10px;color:var(--text3);margin-top:4px">${totalChats} chats de ${totalOLX} posts</div>
+            </div>
+            <div style="width:1px;height:40px;background:var(--border)"></div>
+            <div>
+              <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Meta/dia</div>
+              <div style="font-size:18px;font-weight:700;color:var(--text2);font-family:monospace">${Math.ceil(metaOLX/diasNoMes)}</div>
+              <div style="font-size:10px;color:var(--text3);margin-top:4px">posts por dia · hoje: ${lancHoje?(lancHoje.olx||0):0}</div>
+            </div>
+          </div>
+        </div>`;
+      })()}
     </div>
 
     <!-- Tabela + Insights -->
@@ -3835,7 +3862,7 @@ function renderMetas() {
           </div>
         `).join('')}
       </div>
-      <div style="font-size:10px;font-weight:600;color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px">OLX — Postagens <span style="font-weight:400;color:var(--text3);text-transform:none">(pode gerar chats futuros)</span></div>
+      <div style="font-size:10px;font-weight:600;color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px">OLX — Postagens &amp; Conversão <span style="font-weight:400;color:var(--text3);text-transform:none">(postagens podem gerar chats)</span></div>
       <div class="metas-form-grid">
         ${postagemFontes.map(f=>`
           <div class="form-group">
@@ -3844,6 +3871,11 @@ function renderMetas() {
               value="${lancHoje?(lancHoje[f.id]||0):0}" placeholder="0">
           </div>
         `).join('')}
+        <div class="form-group">
+          <label class="form-label">Chats gerados (OLX)</label>
+          <input class="form-input" type="number" min="0" id="mInp_olx_chats"
+            value="${lancHoje?(lancHoje.olx_chats||0):0}" placeholder="0">
+        </div>
       </div>
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:14px" onclick="salvarLancamentoMetas()">
@@ -3861,6 +3893,7 @@ function salvarLancamentoMetas() {
   METAS_DEFAULT.fontes.forEach(f => {
     lancamento[f.id] = parseInt(document.getElementById('mInp_'+f.id)?.value||'0')||0;
   });
+  lancamento.olx_chats = parseInt(document.getElementById('mInp_olx_chats')?.value||'0')||0;
   const idx = metasData.lancamentos.findIndex(l => l.data === dataHoje);
   if(idx >= 0) metasData.lancamentos[idx] = lancamento;
   else metasData.lancamentos.push(lancamento);
