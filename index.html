@@ -1901,6 +1901,15 @@ function calcAlertaLead(l) {
   }
   if(!refDate) refDate = new Date(l.data + 'T00:00:00');
 
+  // Registrar uma tratativa conta como retorno do corretor — reinicia o prazo
+  if(l.tratativas && l.tratativas.length) {
+    const ultimaTrat = l.tratativas.reduce((max,t) => {
+      const dt = new Date(t.criadoEm || (t.data+'T00:00:00'));
+      return dt > max ? dt : max;
+    }, new Date(0));
+    if(ultimaTrat > refDate) refDate = ultimaTrat;
+  }
+
   const diasPassados = (new Date() - refDate) / (1000*60*60*24);
   const limite = limites[l.etapa];
   if(diasPassados >= limite) {
@@ -2866,6 +2875,7 @@ function adicionarTratativa(leadId) {
         <div style="font-size:12px;color:var(--text1);line-height:1.5;white-space:pre-wrap">${t.texto}</div>
       </div>`).join('');
   }
+  renderPipeline();
   if(currentUser) scheduleSave();
 }
 
@@ -2887,6 +2897,7 @@ function removerTratativa(leadId, idx) {
       </div>`).join('')
     : '<div style="text-align:center;padding:16px;color:var(--text3);font-size:12px">Nenhuma tratativa registrada.</div>';
   }
+  renderPipeline();
   if(currentUser) scheduleSave();
 }
 
