@@ -825,6 +825,10 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
           <input class="form-input" id="lImovel" placeholder="Ex: Torre A — Apto 2q, Studio...">
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">PV — Proposta de Venda</label><input class="form-input" id="lPV" placeholder="Ex: link ou nº da proposta"></div>
+        <div class="form-group"><label class="form-label">AC — Análise do Cliente</label><input class="form-input" id="lAC" placeholder="Status da análise/crédito"></div>
+      </div>
       <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin:4px 0 10px;padding-top:6px;border-top:1px solid var(--border)">💰 Informações Financeiras</div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Valor do Ato (entrada)</label><input class="form-input" id="lAto" placeholder="R$ 0,00" oninput="maskBRL(this)"></div>
@@ -2076,7 +2080,7 @@ function renderAgenda() {
     const isToday = dateStr === todayStr;
     html += `<div class="cal-day${isToday?' today':''}${evts.length?' has-event':''}" onclick="verEventosDia('${dateStr}')" style="cursor:pointer">
       ${d}
-      ${evts.map(e=>`<div class="cal-event ${e.tipo}">${e.hora} ${e.titulo.split('—')[0]}</div>`).join('')}
+      ${evts.map(e=>`<div class="cal-event ${e.tipo}" style="${e.concluido?'opacity:.55;text-decoration:line-through':''}">${e.hora} ${e.concluido?'✅ ':''}${e.titulo.split('—')[0]}</div>`).join('')}
     </div>`;
   }
   const total = firstDay + daysInMonth;
@@ -2088,12 +2092,14 @@ function renderAgenda() {
   const tipoLabel = { visita:'🏠 Visita', reuniao:'🤝 Reunião', ligacao:'📞 Ligação', retorno:'📲 Retorno' };
   document.getElementById('reminderList').innerHTML = prox.length ? prox.map(e=>`
     <div class="reminder-item">
+      <input type="checkbox" ${e.concluido?'checked':''} onchange="toggleEventoConcluido(${e.id})" title="Marcar como concluído" style="width:16px;height:16px;cursor:pointer;flex-shrink:0;margin-top:2px">
       <div class="reminder-dot" style="background:${colors[e.tipo]||'var(--text3)'}"></div>
-      <div class="reminder-info" style="flex:1">
-        <div class="r-title">${e.titulo}</div>
+      <div class="reminder-info" style="flex:1;${e.concluido?'opacity:.55':''}">
+        <div class="r-title" style="${e.concluido?'text-decoration:line-through':''}">${e.titulo}</div>
         <div class="r-sub">👤 ${e.cliente||'—'} · <span style="color:${colors[e.tipo]||'var(--text3)'};font-weight:600;font-size:10px">${tipoLabel[e.tipo]||e.tipo}</span></div>
         <div class="r-time">📅 ${dateLabel(e.data)} · ⏰ ${e.hora}</div>
         ${e.notas?`<div style="font-size:10px;color:var(--text3);margin-top:3px">📝 ${e.notas}</div>`:''}
+        ${e.concluido?'<div style="font-size:10px;color:var(--green);margin-top:3px;font-weight:700">✅ Concluído</div>':''}
       </div>
       <div style="display:flex;flex-direction:column;gap:4px;margin-left:8px;flex-shrink:0">
         <button class="btn btn-ghost btn-sm" onclick="editarEvento(${e.id})" style="font-size:10px;padding:4px 8px">✏️</button>
@@ -2116,14 +2122,16 @@ function verEventosDia(dateStr) {
   } else {
     body.innerHTML = evts.map(e => `
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start">
+        <input type="checkbox" ${e.concluido?'checked':''} onchange="toggleEventoConcluido(${e.id},'${dateStr}')" title="Marcar como concluído" style="width:16px;height:16px;cursor:pointer;flex-shrink:0;margin-top:12px">
         <div style="width:40px;height:40px;border-radius:8px;background:var(--bg4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
           ${{visita:'🏠',reuniao:'🤝',ligacao:'📞',retorno:'📲'}[e.tipo]||'📅'}
         </div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:700;color:var(--text1)">${e.titulo}</div>
+        <div style="flex:1;min-width:0;${e.concluido?'opacity:.55':''}">
+          <div style="font-size:13px;font-weight:700;color:var(--text1);${e.concluido?'text-decoration:line-through':''}">${e.titulo}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">👤 ${e.cliente||'—'} · <span style="color:${colors[e.tipo]||'var(--text3)'};font-weight:600">${tipoLabel[e.tipo]||e.tipo}</span></div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">⏰ ${e.hora}</div>
           ${e.notas ? `<div style="font-size:11px;color:var(--text3);margin-top:3px">📝 ${e.notas}</div>` : ''}
+          ${e.concluido?'<div style="font-size:10px;color:var(--green);margin-top:3px;font-weight:700">✅ Concluído</div>':''}
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
           <button class="btn btn-ghost btn-sm" onclick="closeModal('modalDia');editarEvento(${e.id})" style="font-size:10px;padding:4px 8px">✏️ Editar</button>
@@ -2139,6 +2147,15 @@ function delEventoDia(id, dateStr) {
   if(currentUser) scheduleSave();
   renderAgenda();
   verEventosDia(dateStr);
+}
+
+function toggleEventoConcluido(id, dateStr) {
+  const e = state.eventos.find(x => x.id === id);
+  if(!e) return;
+  e.concluido = !e.concluido;
+  if(currentUser) scheduleSave();
+  renderAgenda();
+  if(dateStr) verEventosDia(dateStr);
 }
 
 // ── Imóveis ──
@@ -2604,6 +2621,8 @@ function verLead(id) {
       </div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Produto de interesse</label><input class="form-input" id="dImovel" value="${l.imovel||''}" placeholder="Ex: Torre A — Apto 2q"></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Valor estimado</label><input class="form-input" id="dValor" value="${l.valor ? fi(l.valor) : ''}" placeholder="R$ 0,00" oninput="maskBRL(this)" style="color:var(--green);font-family:'JetBrains Mono',monospace"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">PV — Proposta de Venda</label><input class="form-input" id="dPV" value="${l.pv||''}" placeholder="Ex: link ou nº da proposta"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">AC — Análise do Cliente</label><input class="form-input" id="dAC" value="${l.ac||''}" placeholder="Status da análise/crédito"></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Origem</label>
         ${(()=>{
           const lista = ['CV-CRM','Instagram','Facebook','Campanha','Lead GG','Lead Super','Lead Frio','Lead Gerente','Indicação','OLX','Espontaneo'];
@@ -2746,6 +2765,8 @@ function salvarEdicaoLead(id) {
   l.renda  = document.getElementById('dRenda')?.value.trim()  || l.renda;
   l.regiao = document.getElementById('dRegiao')?.value        || l.regiao;
   l.imovel = document.getElementById('dImovel')?.value.trim() || l.imovel;
+  l.pv     = document.getElementById('dPV')?.value.trim() || '';
+  l.ac     = document.getElementById('dAC')?.value.trim() || '';
   l.origem = (()=>{ const v=document.getElementById('dOrigem')?.value; return v==='outros'?(document.getElementById('dOrigemOutros')?.value.trim()||'Outros'):v; })() || l.origem;
   l.obs    = document.getElementById('dObs')?.value.trim();
   const novaScore = parseInt(document.getElementById('dScore')?.value || '0');
@@ -3119,13 +3140,15 @@ function salvarLead() {
     regiao: document.getElementById('lRegiao').value,
     imovel: document.getElementById('lImovel').value,
     valor: 0, ato, fgts: fgtsSim, fgtsValor: fgtsVal, fgtsAnos: 0,
+    pv:     document.getElementById('lPV').value.trim(),
+    ac:     document.getElementById('lAC').value.trim(),
     origem: (()=>{ const v=document.getElementById('lOrigem').value; return v==='outros'?(document.getElementById('lOrigemOutros').value.trim()||'Outros'):v; })(),
     etapa:  document.getElementById('lEtapa').value,
     obs:    document.getElementById('lObs').value,
     score:  parseInt(document.getElementById('lScore').value) || 0,
     data:   hoje()
   });
-  ['lNome','lTel','lEmail','lRenda','lImovel','lAto','lFgtsValor','lObs'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['lNome','lTel','lEmail','lRenda','lImovel','lPV','lAC','lAto','lFgtsValor','lObs'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('lRegiao').value='';
   document.getElementById('lFgtsPossui').value='nao';
   document.getElementById('fgtsValorRow').style.display='none';
