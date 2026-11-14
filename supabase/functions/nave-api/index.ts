@@ -39,7 +39,23 @@ function randomCode(n = 8) {
   const r = crypto.getRandomValues(new Uint8Array(n));
   return Array.from(r, (x) => chars[x % chars.length]).join("");
 }
-const publicUser = (u: any) => ({ username: u.username, name: u.name, role: u.role, nascimento: u.nascimento || "" });
+const publicUser = (u: any) => ({ username: u.username, name: u.name, role: u.role, nascimento: u.nascimento || "", agente: !!u.agente });
+const AGENT_KEY = Deno.env.get("NAVE_AGENT_KEY") || "";
+const normFone = (s: unknown) => { const d = String(s || "").replace(/\D/g, ""); return d ? "+" + d : ""; };
+// hora/dia no fuso de Brasília (o agente responde no horário do Well)
+function brt(iso: string) {
+  const d = new Date(iso);
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", hour: "numeric", hour12: false, weekday: "short" }).formatToParts(d);
+  const h = Number(p.find((x) => x.type === "hour")!.value) % 24;
+  const w = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.find((x) => x.type === "weekday")!.value);
+  return { h, w };
+}
+const CLIENTE_CAMPOS = ["nome", "origem", "origem_detalhe", "perfil", "empreendimento", "etapa", "renda", "entrada", "resumo", "proximo_followup", "passado_humano", "objecoes"];
+async function agenteUser(s: Ctx) {
+  const u = await getUser(s!.u);
+  if (!u?.agente) fail(403, "Agente não liberado para este usuário");
+  return u;
+}
 const normUser = (s: unknown) => String(s || "").trim().toLowerCase().replace(/\s/g, "");
 
 class HttpErr extends Error { constructor(public status: number, msg: string) { super(msg); } }
@@ -149,6 +165,45 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     return { ok: true };
   },
 
+  // ── Agente (tela do corretor) ──
+  async agente_get(_b, s) {
+    await agenteUser(s);
+    const [cfg, precos, clientes] = await Promise.all([
+      db.from("agente_config").select("alerta_numero,alerta_ativo").eq("username", s!.u).maybeSingle(),
+      db.from("agente_precos").select("*").eq("username", s!.u).order("regiao").order("empreendimento").order("valor", { nullsFirst: false }),
+      db.from("agente_clientes").select("*").eq("username", s!.u).order("ultimo_msg_cliente", { ascending: false, nullsFirst: false }).limit(500),
+    ]);
+    return { config: cfg.data || {}, precos: precos.data || [], clientes: clientes.data || [] };
+  },
+  async agente_set_config(b, s) {
+    await agenteUser(s);
+    let numero = normFone(b.alerta_numero);
+    if (numero.length === 11 || numero.length === 12) numero = "+55" + numero.slice(1); // digitado sem DDI (DDD + número)
+    if (b.alerta_numero && (numero.length < 12 || numero.length > 16)) fail(400, "Número inválido. Use DDI + DDD + número, ex.: 55 21 99999-9999");
+    await db.from("agente_config").upsert({ username: s!.u, alerta_numero: numero || null, alerta_ativo: b.alerta_ativo !== false, atualizado_em: new Date().toISOString() }, { onConflict: "username" });
+    return { ok: true, alerta_numero: numero };
+  },
+  async agente_preco_salvar(b, s) {
+    await agenteUser(s);
+    const row: any = {
+      username: s!.u, regiao: String(b.regiao || "Porto Maravilha").trim(), empreendimento: String(b.empreendimento || "").trim(),
+      bairro: String(b.bairro || "").trim() || null, tipologia: String(b.tipologia || "").trim(),
+      valor: b.valor === "" || b.valor == null ? null : Number(b.valor), entrega: String(b.entrega || "").trim() || null,
+      observacao: String(b.observacao || "").trim() || null, bloqueado: !!b.bloqueado, atualizado_em: new Date().toISOString(),
+    };
+    if (!row.empreendimento || !row.tipologia) fail(400, "Informe empreendimento e tipologia");
+    if (row.valor != null && !(row.valor > 0)) fail(400, "Valor inválido");
+    const q = b.id ? db.from("agente_precos").update(row).eq("id", Number(b.id)).eq("username", s!.u) : db.from("agente_precos").insert(row);
+    const { error } = await q;
+    if (error) fail(500, error.message);
+    return { ok: true };
+  },
+  async agente_preco_excluir(b, s) {
+    await agenteUser(s);
+    await db.from("agente_precos").delete().eq("id", Number(b.id)).eq("username", s!.u);
+    return { ok: true };
+  },
+
   // ── Admin ──
   async admin_users() {
     const { data } = await db.from("nave_users").select("username,name,role,nascimento").order("name");
@@ -200,6 +255,73 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
 };
 const PUBLIC = new Set(["login", "register", "request_access", "check_request"]);
 
+// ── Entrada do agente (servidor do WhatsApp → CRM). Só com a chave secreta x-agent-key. ──
+const agentActions: Record<string, (b: any) => Promise<unknown>> = {
+  // Cada mensagem trocada alimenta o "perfil vivo": horário em que o cliente responde, velocidade, se prefere áudio.
+  async agente_mensagem(b) {
+    const username = normUser(b.username), telefone = normFone(b.telefone);
+    if (!username || !telefone) fail(400, "username e telefone obrigatórios");
+    const u = await getUser(username);
+    if (!u?.agente) fail(403, "Agente não liberado para este usuário");
+    const em = b.em ? new Date(b.em).toISOString() : new Date().toISOString();
+    const de = b.de === "nos" ? "nos" : "cliente";
+    const { data: c0 } = await db.from("agente_clientes").select("*").eq("username", username).eq("telefone", telefone).maybeSingle();
+    const c: any = c0 || { username, telefone, horas_resposta: Array(24).fill(0), dias_resposta: Array(7).fill(0), msgs_cliente: 0, audios_cliente: 0, soma_resposta_min: 0, n_respostas: 0 };
+    if (b.nome && !c.nome) c.nome = String(b.nome).slice(0, 120);
+    if (b.origem && !c.origem) { c.origem = String(b.origem).slice(0, 60); c.origem_detalhe = b.origem_detalhe ? String(b.origem_detalhe).slice(0, 300) : null; }
+    if (de === "cliente") {
+      const { h, w } = brt(em);
+      c.horas_resposta[h]++; c.dias_resposta[w]++; c.msgs_cliente++;
+      if (b.tipo === "audio") c.audios_cliente++;
+      // tempo de resposta do cliente: só conta se a última mensagem foi nossa e ele respondeu em até 3 dias
+      if (c.ultimo_msg_nosso && (!c.ultimo_msg_cliente || c.ultimo_msg_nosso > c.ultimo_msg_cliente)) {
+        const min = (Date.parse(em) - Date.parse(c.ultimo_msg_nosso)) / 60000;
+        if (min >= 0 && min < 4320) { c.soma_resposta_min = Number(c.soma_resposta_min) + min; c.n_respostas++; }
+      }
+      c.ultimo_msg_cliente = em;
+    } else c.ultimo_msg_nosso = em;
+    c.atualizado_em = new Date().toISOString();
+    const { error } = await db.from("agente_clientes").upsert(c, { onConflict: "username,telefone" });
+    if (error) fail(500, error.message);
+    return { ok: true };
+  },
+  // O agente grava o que entendeu (etapa, perfil, objeções...) e aprendizados sobre o cliente.
+  async agente_cliente(b) {
+    const username = normUser(b.username), telefone = normFone(b.telefone);
+    if (!username || !telefone) fail(400, "username e telefone obrigatórios");
+    const upd: any = { username, telefone, atualizado_em: new Date().toISOString() };
+    for (const k of CLIENTE_CAMPOS) if (k in (b.campos || {})) upd[k] = b.campos[k];
+    if (b.aprendizado) {
+      const { data } = await db.from("agente_clientes").select("aprendizados").eq("username", username).eq("telefone", telefone).maybeSingle();
+      upd.aprendizados = [...(data?.aprendizados || []), { em: upd.atualizado_em, texto: String(b.aprendizado).slice(0, 500), aprovado: false }];
+    }
+    const { error } = await db.from("agente_clientes").upsert(upd, { onConflict: "username,telefone" });
+    if (error) fail(500, error.message);
+    return { ok: true };
+  },
+  async agente_evento(b) {
+    const username = normUser(b.username);
+    if (!username || !b.tipo) fail(400, "username e tipo obrigatórios");
+    await db.from("agente_eventos").insert({ username, telefone: normFone(b.telefone) || null, tipo: String(b.tipo).slice(0, 40), dados: b.dados || null });
+    return { ok: true };
+  },
+  // O que o agente precisa saber antes de responder: preços válidos, número de alerta e o perfil do cliente.
+  async agente_contexto(b) {
+    const username = normUser(b.username), telefone = normFone(b.telefone);
+    const [cfg, precos, cli] = await Promise.all([
+      db.from("agente_config").select("alerta_numero,alerta_ativo").eq("username", username).maybeSingle(),
+      db.from("agente_precos").select("regiao,empreendimento,bairro,tipologia,valor,entrega,observacao,bloqueado,atualizado_em").eq("username", username),
+      telefone ? db.from("agente_clientes").select("*").eq("username", username).eq("telefone", telefone).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    return { config: cfg.data, precos: precos.data || [], cliente: cli.data };
+  },
+};
+function safeEq(a: string, b: string) {
+  if (!a || a.length !== b.length) return false;
+  let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin") || "";
   const cors = {
@@ -213,6 +335,10 @@ Deno.serve(async (req) => {
   try {
     if (req.method !== "POST") fail(405, "Método não permitido");
     const b = await req.json().catch(() => ({}));
+    if (agentActions[b.action]) {
+      if (!safeEq(req.headers.get("x-agent-key") || "", AGENT_KEY)) fail(401, "Chave do agente inválida");
+      return json(200, await agentActions[b.action](b));
+    }
     const fn = actions[b.action];
     if (!fn) fail(400, "Ação desconhecida");
     let s: Ctx = null;

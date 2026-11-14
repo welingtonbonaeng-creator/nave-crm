@@ -562,6 +562,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
     <div class="nav-section">Relatórios</div>
     <div class="nav-item" onclick="showPage('vendas')"><span class="ico">💰</span><span>Vendas</span></div>
     <div class="nav-item" id="navMetas" style="display:none" onclick="showPage('metas')"><span class="ico">🎯</span><span>Painel de Metas</span></div>
+    <div class="nav-item" id="navAgente" style="display:none" onclick="showPage('agente')"><span class="ico">🤖</span><span>Agente</span></div>
   </nav>
   <div class="sidebar-footer">
     <div class="user-row" style="margin-bottom:8px">
@@ -697,6 +698,10 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 
     <div class="page" id="pageMetas">
       <div id="metasContent"></div>
+    </div>
+
+    <div class="page" id="pageAgente">
+      <div id="agenteContent"><div class="empty"><p>Carregando...</p></div></div>
     </div>
 
   </div>
@@ -1217,6 +1222,7 @@ function loginSuccess(user) {
   if(user.role === 'admin') document.getElementById('btnAdmin').style.display = 'flex';
   else document.getElementById('btnAdmin').style.display = 'none';
   document.getElementById('navMetas').style.display = 'flex';
+  document.getElementById('navAgente').style.display = user.agente ? 'flex' : 'none';
   loadUserState(user.username);
   checkBirthday(user);
   checkDailyMotivation(user);
@@ -1562,6 +1568,121 @@ async function resetSenha(username) {
 }
 
 // ══════════════════════════════════════════════
+// AGENTE (alertas, preços base, perfil vivo)
+// ══════════════════════════════════════════════
+let agenteData = { config:{}, precos:[], clientes:[] };
+let _precoEdit = null;
+const escA = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtBRL = v => v == null ? '—' : Number(v).toLocaleString('pt-BR', { style:'currency', currency:'BRL', maximumFractionDigits:0 });
+const DIAS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+function melhorHorario(c) {
+  const h = c.horas_resposta || [], tot = h.reduce((a,b)=>a+b,0);
+  if(tot < 3) return '<span style="color:var(--text3)">aprendendo…</span>';
+  // hora em que mais responde; o % conta 1h antes e 1h depois
+  const bi = h.indexOf(Math.max(...h));
+  const perto = h[(bi+23)%24] + h[bi] + h[(bi+1)%24];
+  const d = c.dias_resposta || [], di = d.indexOf(Math.max(...d));
+  return `por volta das ${bi}h <span style="color:var(--text3)">(${Math.round(perto/tot*100)}% das respostas) · mais ${DIAS[di]}</span>`;
+}
+function fmtQuando(iso) { if(!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
+async function loadAgente() {
+  const r = await api('agente_get');
+  const el = document.getElementById('agenteContent');
+  if(r.error) { el.innerHTML = `<div class="empty"><p>${escA(r.error)}</p></div>`; return; }
+  agenteData = r; renderAgente();
+}
+function renderAgente() {
+  const { config, precos, clientes } = agenteData;
+  const el = document.getElementById('agenteContent');
+  const linhaPreco = p => `
+    <tr>
+      <td>${escA(p.empreendimento)}${p.bairro ? `<div style="font-size:10px;color:var(--text3)">${escA(p.bairro)}</div>` : ''}</td>
+      <td>${escA(p.tipologia)}</td>
+      <td style="white-space:nowrap">${p.bloqueado ? '<span class="badge" style="background:var(--redbg);color:var(--red)">passa pro humano</span>' : fmtBRL(p.valor)}</td>
+      <td>${escA(p.entrega || '—')}</td>
+      <td style="font-size:10px;color:var(--text3)">${new Date(p.atualizado_em).toLocaleDateString('pt-BR')}</td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="editarPreco(${p.id})" aria-label="Editar">✏️</button>
+        <button class="btn btn-sm" style="background:var(--redbg);color:var(--red)" onclick="excluirPreco(${p.id})" aria-label="Excluir">✕</button></td>
+    </tr>`;
+  const ed = _precoEdit || {};
+  const linhaCliente = c => {
+    const resp = c.n_respostas ? Math.round(c.soma_resposta_min / c.n_respostas) + ' min' : '—';
+    const aud = c.msgs_cliente ? Math.round(c.audios_cliente / c.msgs_cliente * 100) + '%' : '—';
+    return `<tr>
+      <td>${escA(c.nome || 'Sem nome')}<div style="font-size:10px;color:var(--text3)">${escA(c.telefone)}</div></td>
+      <td>${escA(c.origem || '—')}</td><td>${escA(c.etapa || '—')}</td>
+      <td>${melhorHorario(c)}</td><td>${resp}</td><td>${aud}</td>
+      <td style="font-size:11px">${fmtQuando(c.ultimo_msg_cliente)}</td>
+      <td style="font-size:11px">${(c.aprendizados||[]).map(a => `<div>• ${escA(a.texto)}${a.aprovado ? '' : ' <span style="color:var(--yellow)">(a aprovar)</span>'}</div>`).join('') || '—'}</td>
+    </tr>`;
+  };
+  el.innerHTML = `
+  <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:16px">
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔔 Número que recebe os alertas</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Quando um lead esquentar, o agente avisa neste WhatsApp com o motivo e o link da conversa. Use um número diferente do que atende os clientes.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input class="form-input" id="agAlertaNum" inputmode="tel" placeholder="55 21 99999-9999" value="${escA(config.alerta_numero || '')}" style="max-width:240px">
+        <label style="font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="agAlertaAtivo" ${config.alerta_ativo !== false ? 'checked' : ''}> Alertas ligados</label>
+        <button class="btn btn-primary btn-sm" onclick="salvarAlerta()">Salvar</button>
+        <span id="agAlertaMsg" style="font-size:12px"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">💲 Preços base (o agente só fala "a partir de")</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Edite quando a tabela mudar. Marque "passa pro humano" quando o valor não puder ser citado.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px">
+        <input class="form-input" id="pEmp" placeholder="Empreendimento" value="${escA(ed.empreendimento||'')}">
+        <input class="form-input" id="pBairro" placeholder="Bairro" value="${escA(ed.bairro||'')}">
+        <input class="form-input" id="pTipo" placeholder="Tipologia (ex.: 2 quartos)" value="${escA(ed.tipologia||'')}">
+        <input class="form-input" id="pValor" inputmode="numeric" placeholder="Valor (ex.: 328000)" value="${ed.valor ?? ''}">
+        <input class="form-input" id="pEntrega" placeholder="Entrega (ex.: 04/2029)" value="${escA(ed.entrega||'')}">
+        <input class="form-input" id="pRegiao" placeholder="Região" value="${escA(ed.regiao||'Porto Maravilha')}">
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+        <label style="font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="pBloq" ${ed.bloqueado ? 'checked' : ''}> Passa pro humano</label>
+        <button class="btn btn-primary btn-sm" onclick="salvarPreco()">${_precoEdit ? 'Salvar alteração' : '+ Adicionar'}</button>
+        ${_precoEdit ? '<button class="btn btn-ghost btn-sm" onclick="_precoEdit=null;renderAgente()">Cancelar</button>' : ''}
+        <span id="agPrecoMsg" style="font-size:12px;color:var(--red)"></span>
+      </div>
+      <div style="overflow-x:auto"><table style="width:100%;font-size:12px">
+        <thead><tr><th>Empreendimento</th><th>Tipologia</th><th>A partir de</th><th>Entrega</th><th>Atualizado</th><th></th></tr></thead>
+        <tbody>${precos.map(linhaPreco).join('') || '<tr><td colspan="6">Nenhum preço cadastrado</td></tr>'}</tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">🧠 Perfil vivo dos clientes (${clientes.length})</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">O agente preenche sozinho a cada mensagem: horário em que o cliente costuma responder, quanto demora e se prefere áudio. Os aprendizados ficam "a aprovar" até você confirmar.</div>
+      <div style="overflow-x:auto"><table style="width:100%;font-size:12px">
+        <thead><tr><th>Cliente</th><th>Origem</th><th>Etapa</th><th>Melhor horário</th><th>Responde em</th><th>Áudio</th><th>Última msg</th><th>Aprendizados</th></tr></thead>
+        <tbody>${clientes.map(linhaCliente).join('') || '<tr><td colspan="8">Ainda sem clientes. Eles aparecem aqui quando o agente estiver ligado ao WhatsApp.</td></tr>'}</tbody>
+      </table></div>
+    </div>
+  </div>`;
+}
+async function salvarAlerta() {
+  const msg = document.getElementById('agAlertaMsg');
+  const r = await api('agente_set_config', { alerta_numero: document.getElementById('agAlertaNum').value, alerta_ativo: document.getElementById('agAlertaAtivo').checked });
+  msg.style.color = r.error ? 'var(--red)' : 'var(--green)';
+  msg.textContent = r.error || '✅ Salvo';
+  if(!r.error) { agenteData.config.alerta_numero = r.alerta_numero; document.getElementById('agAlertaNum').value = r.alerta_numero || ''; }
+}
+function editarPreco(id) { _precoEdit = agenteData.precos.find(p => p.id === id) || null; renderAgente(); document.getElementById('pEmp').focus(); }
+async function salvarPreco() {
+  const v = id => document.getElementById(id).value;
+  const r = await api('agente_preco_salvar', { id: _precoEdit?.id, empreendimento: v('pEmp'), bairro: v('pBairro'), tipologia: v('pTipo'),
+    valor: v('pValor').replace(/\D/g,''), entrega: v('pEntrega'), regiao: v('pRegiao'), bloqueado: document.getElementById('pBloq').checked, observacao: _precoEdit?.observacao });
+  if(r.error) { document.getElementById('agPrecoMsg').textContent = r.error; return; }
+  _precoEdit = null; loadAgente();
+}
+async function excluirPreco(id) {
+  if(!confirm('Excluir este preço?')) return;
+  await api('agente_preco_excluir', { id }); loadAgente();
+}
+
+// ══════════════════════════════════════════════
 // NOTA DO LEAD
 // ══════════════════════════════════════════════
 function notaCor(n) {
@@ -1670,6 +1791,7 @@ const PAGE_META = {
   imoveis:   { title:'Imóveis',    sub:'Carteira de empreendimentos',   action:'<button class="btn btn-primary" onclick="openModal(\'modalImovel\')">+ Imóvel</button>' },
   vendas:    { title:'Vendas',     sub:'Resultados e comissões',        action:'' },
   metas:     { title:'Painel de Metas', sub:'Prospecção diária — meta de 1.000 contatos/mês', action:'' },
+  agente:    { title:'Agente', sub:'Alertas, preços base e o perfil que o agente aprende de cada cliente', action:'' },
 };
 function showPage(p) {
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
@@ -1680,6 +1802,7 @@ function showPage(p) {
   document.getElementById('pageSub').textContent   = PAGE_META[p].sub;
   document.getElementById('topbarActions').innerHTML = PAGE_META[p].action;
   render();
+  if(p === 'agente') loadAgente();
 }
 
 // ══════════════════════════════════════════════

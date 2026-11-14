@@ -46,3 +46,7 @@ ALTER TABLE nave_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nave_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nave_requests ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON nave_users, nave_state, nave_config, nave_requests FROM anon, authenticated;
+
+-- Agente (14/11/2026): ver a migração aplicada em produção.
+-- nave_users.agente (bool) libera a aba; tabelas agente_config, agente_precos, agente_clientes (perfil vivo), agente_eventos.
+-- Todas com RLS sem policies + revoke anon/authenticated. Escrita do agente só pela nave-api com header x-agent-key.
