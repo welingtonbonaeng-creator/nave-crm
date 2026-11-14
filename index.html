@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nave — CRM Imobiliário</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -1095,13 +1094,22 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 // ══════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════
-// ══ SUPABASE CONFIG ══
-// ⚠️  Substitua pelas suas credenciais do painel Supabase
-const SUPABASE_URL = 'https://wwoasqjidsrplkpwjsro.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_1ArtUvOrkSjOgXlDZln2EQ_5gOlLLfo';
-const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-const LOGIN_KEY = 'nave_crm_session_v2';
+// ══ API (todo acesso ao banco passa pela função autenticada no servidor) ══
+const API_URL = 'https://wwoasqjidsrplkpwjsro.supabase.co/functions/v1/nave-api';
+const LOGIN_KEY = 'nave_crm_session_v3';
+async function api(action, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const tok = localStorage.getItem(LOGIN_KEY);
+  if(tok) headers['x-nave-token'] = tok;
+  let res, data;
+  try {
+    res = await fetch(API_URL, { method:'POST', headers, body: JSON.stringify(Object.assign({ action }, body || {})) });
+    data = await res.json().catch(() => ({}));
+  } catch(e) { return { error: 'Sem conexão com o servidor. Tente de novo.' }; }
+  if(res.status === 401 && currentUser && action !== 'login' && action !== 'change_password') { localStorage.removeItem(LOGIN_KEY); location.reload(); }
+  if(!res.ok) return { error: data.error || ('Erro ' + res.status) };
+  return data;
+}
 let currentUser = null;
 let _visitaLeadId = null;
 
@@ -1131,24 +1139,17 @@ function hideLoading() {
 
 // ── Supabase: usuários ──
 async function getUsers() {
-  const { data } = await _sb.from('nave_users').select('*');
-  return data || [];
-}
-async function ensureAdmin() {
-  const { data } = await _sb.from('nave_users').select('username').eq('username','carioca').single();
-  if(!data) {
-    await _sb.from('nave_users').insert({ username:'carioca', name:'Carlos Henrique', password:'1406', role:'admin', nascimento:'' });
-  }
+  const r = await api('admin_users');
+  return r.users || [];
 }
 async function initAuth() {
   applyTheme(localStorage.getItem('nave_theme') || 'dark');
   showLoading('Iniciando...');
   try {
-    await ensureAdmin();
-    const session = localStorage.getItem(LOGIN_KEY);
-    if(session) {
-      const { data: user } = await _sb.from('nave_users').select('*').eq('username', session).single();
-      if(user) { hideLoading(); loginSuccess(user); return; }
+    localStorage.removeItem('nave_crm_session_v2');
+    if(localStorage.getItem(LOGIN_KEY)) {
+      const r = await api('me');
+      if(r.user) { hideLoading(); loginSuccess(r.user); return; }
       localStorage.removeItem(LOGIN_KEY);
     }
   } catch(e) { console.error('initAuth error:', e); }
@@ -1181,30 +1182,11 @@ async function doRegister() {
   if(pass.length < 4)  return showErr('Senha deve ter pelo menos 4 caracteres');
   if(pass !== pass2)   return showErr('As senhas não coincidem');
   showLoading('Verificando...');
-  let codeValid = false, requestId = null;
-  // 1. Verificar código avulso (nave_config)
-  const { data: cfgCode } = await _sb.from('nave_config').select('value').eq('key','access_code').single();
-  if(cfgCode?.value && code.toLowerCase() === cfgCode.value.toLowerCase()) codeValid = true;
-  // 2. Verificar código de solicitação (nave_requests)
-  if(!codeValid) {
-    const { data: req } = await _sb.from('nave_requests').select('id,code').eq('code', code).eq('status','approved').single();
-    if(req) { codeValid = true; requestId = req.id; }
-  }
-  if(!codeValid) return showErr('Código inválido ou já utilizado. Solicite um novo ao administrador.');
-  const { data: existing } = await _sb.from('nave_users').select('username').eq('username', user).single();
-  if(existing) return showErr('Este login já existe');
-  const { error } = await _sb.from('nave_users').insert({ username:user, name, password:pass, role:'corretor', nascimento:nasc||'' });
-  if(error) return showErr('Erro ao criar conta: ' + error.message);
-  // Invalidar código após uso único
-  if(requestId) {
-    await _sb.from('nave_requests').update({ status:'used' }).eq('id', requestId);
-  } else {
-    await _sb.from('nave_config').upsert({ key:'access_code', value:'' }, { onConflict:'key' });
-  }
-  localStorage.setItem(LOGIN_KEY, user);
-  const { data: newUser } = await _sb.from('nave_users').select('*').eq('username', user).single();
+  const r = await api('register', { name, username:user, password:pass, nascimento:nasc||'', code });
+  if(r.error) return showErr(r.error);
+  localStorage.setItem(LOGIN_KEY, r.token);
   hideLoading();
-  loginSuccess(newUser);
+  loginSuccess(r.user);
 }
 
 async function doLogin() {
@@ -1213,16 +1195,15 @@ async function doLogin() {
   const errEl = document.getElementById('loginErr');
   errEl.style.display = 'none';
   showLoading('Entrando...');
-  const { data: user } = await _sb.from('nave_users').select('*')
-    .eq('username', username).eq('password', password).single();
+  const r = await api('login', { username, password });
   hideLoading();
-  if(!user) {
-    errEl.textContent = 'Usuário ou senha incorretos.';
+  if(r.error) {
+    errEl.textContent = r.error;
     errEl.style.display = 'block';
     return;
   }
-  localStorage.setItem(LOGIN_KEY, username);
-  loginSuccess(user);
+  localStorage.setItem(LOGIN_KEY, r.token);
+  loginSuccess(r.user);
 }
 
 function loginSuccess(user) {
@@ -1287,13 +1268,11 @@ async function salvarNovaSenha() {
   const errEl = document.getElementById('cfgErr');
   const okEl  = document.getElementById('cfgOk');
   const showErr = msg => { errEl.textContent=msg; errEl.style.display='block'; okEl.style.display='none'; };
-  if(atual !== currentUser.password) return showErr('Senha atual incorreta');
   if(nova.length < 4)                return showErr('Nova senha deve ter mínimo 4 caracteres');
   if(nova !== conf)                  return showErr('As senhas não coincidem');
   errEl.style.display = 'none';
-  const { error } = await _sb.from('nave_users').update({ password: nova }).eq('username', currentUser.username);
-  if(error) return showErr('Erro ao salvar: ' + error.message);
-  currentUser.password = nova;
+  const r = await api('change_password', { atual, nova });
+  if(r.error) return showErr(r.error);
   okEl.style.display = 'block';
   setTimeout(() => closeConfig(), 1500);
 }
@@ -1359,24 +1338,24 @@ async function saveUserState() {
   if(!currentUser || _saving) return;
   _saving = true;
   const payload = {
-    username:   currentUser.username,
     leads:      state.leads,
     eventos:    state.eventos,
     imoveis:    state.imoveis,
     vendas:     state.vendas,
     next_id:    state.nextId,
     pipe_ordem: state.pipeOrdem || null,
-    alertas:    state.alertas   || null,
-    updated_at: new Date().toISOString()
+    alertas:    state.alertas   || null
   };
-  const { error } = await _sb.from('nave_state').upsert(payload, { onConflict: 'username' });
-  if(error) console.error('saveUserState:', error);
+  const r = await api('save_state', { state: payload });
+  if(r.error) console.error('saveUserState:', r.error);
   _saving = false;
 }
 async function loadUserState(username) {
   showLoading('Carregando dados...');
   try {
-    const { data } = await _sb.from('nave_state').select('*').eq('username', username).single();
+    const r = await api('load_state');
+    if(r.error) throw new Error(r.error);
+    const data = r.state;
     if(data) {
       state.leads   = Array.isArray(data.leads)   ? data.leads   : state.leads;
       state.eventos = Array.isArray(data.eventos) ? data.eventos : state.eventos;
@@ -1405,8 +1384,8 @@ async function openAdmin() {
   await renderAdminUsers();
   showAdminTab('usuarios');
   // Carregar badge de solicitações pendentes
-  const { data } = await _sb.from('nave_requests').select('id').eq('status','pending');
-  const n = (data||[]).length;
+  const rq = await api('admin_requests');
+  const n = (rq.requests||[]).filter(x => x.status === 'pending').length;
   const b = document.getElementById('badgeSolic');
   if(b) { b.textContent = n; b.style.display = n ? '' : 'none'; }
   document.getElementById('adminPanel').classList.add('open');
@@ -1419,8 +1398,7 @@ function showAdminTab(tab) {
   if(tab === 'solicitacoes') { renderCodigoAtivo(); renderSolicitacoes(); }
 }
 async function renderCodigoAtivo() {
-  const { data: cfgCode } = await _sb.from('nave_config').select('value').eq('key','access_code').single();
-  const code = cfgCode?.value || '';
+  const code = (await api('admin_get_code')).code || '';
   const display = document.getElementById('accessCodeDisplay');
   const empty   = document.getElementById('accessCodeEmpty');
   const text    = document.getElementById('accessCodeText');
@@ -1433,15 +1411,8 @@ async function renderCodigoAtivo() {
     if(empty)   empty.style.display   = 'block';
   }
 }
-function _randomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let c = '';
-  for(let i = 0; i < 8; i++) c += chars[Math.floor(Math.random() * chars.length)];
-  return c;
-}
 async function gerarNovoCodigo() {
-  const code = _randomCode();
-  await _sb.from('nave_config').upsert({ key:'access_code', value:code }, { onConflict:'key' });
+  await api('admin_set_code', {});
   await renderCodigoAtivo();
   document.getElementById('accessCodeStatus').textContent = '✅ Código gerado! Copie e envie ao corretor.';
 }
@@ -1452,14 +1423,14 @@ async function copiarCodigo() {
   document.getElementById('accessCodeStatus').textContent = '📋 Copiado para a área de transferência!';
 }
 async function limparCodigo() {
-  await _sb.from('nave_config').upsert({ key:'access_code', value:'' }, { onConflict:'key' });
+  await api('admin_set_code', { clear:true });
   await renderCodigoAtivo();
   document.getElementById('accessCodeStatus').textContent = '🚫 Cadastros bloqueados.';
 }
 function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
 
 // ── Solicitações de acesso ──
-let _pendingRequestId = null;
+let _pendingRequestId = null, _pendingTicket = null;
 async function doSolicitarCodigo() {
   const name = document.getElementById('reqName').value.trim();
   const user = document.getElementById('reqUser').value.trim().toLowerCase().replace(/\s/g,'');
@@ -1468,20 +1439,18 @@ async function doSolicitarCodigo() {
   if(!name) return showErr('Informe seu nome completo');
   if(!user) return showErr('Informe o login desejado');
   showLoading('Enviando...');
-  const { data: ex } = await _sb.from('nave_users').select('username').eq('username', user).single();
-  if(ex) { hideLoading(); return showErr('Este login já está em uso, escolha outro'); }
-  const { data, error } = await _sb.from('nave_requests').insert({ name, username:user, status:'pending' }).select().single();
+  const r = await api('request_access', { name, username:user });
   hideLoading();
-  if(error) return showErr('Erro ao enviar: ' + error.message);
-  _pendingRequestId = data.id;
+  if(r.error) return showErr(r.error);
+  _pendingRequestId = r.id; _pendingTicket = r.ticket;
   showAuthScreen('waiting');
 }
 async function verificarSolicitacao() {
   if(!_pendingRequestId) return;
   showLoading('Verificando...');
-  const { data } = await _sb.from('nave_requests').select('*').eq('id', _pendingRequestId).single();
+  const data = await api('check_request', { id:_pendingRequestId, ticket:_pendingTicket });
   hideLoading();
-  if(!data) return;
+  if(data.error) return;
   if(data.status === 'approved' && data.code) {
     document.getElementById('waitingCodeBox').style.display  = 'block';
     document.getElementById('waitingPendingBox').style.display = 'none';
@@ -1497,8 +1466,7 @@ function usarCodigoSolicitado() {
   setTimeout(() => { const el = document.getElementById('regCode'); if(el) el.value = code; }, 80);
 }
 async function renderSolicitacoes() {
-  const { data } = await _sb.from('nave_requests').select('*').order('created_at', { ascending: false });
-  const reqs    = data || [];
+  const reqs    = (await api('admin_requests')).requests || [];
   const pending = reqs.filter(r => r.status === 'pending');
   const rest    = reqs.filter(r => r.status !== 'pending');
   const badge   = document.getElementById('badgeSolic');
@@ -1539,9 +1507,9 @@ async function renderSolicitacoes() {
     </div>` : ''}`;
 }
 async function aprovarSolicitacao(id) {
-  const code = _randomCode();
-  const { error } = await _sb.from('nave_requests').update({ status:'approved', code }).eq('id', id);
-  if(error) { alert('Erro: ' + error.message); return; }
+  const r = await api('admin_approve_request', { id });
+  if(r.error) { alert('Erro: ' + r.error); return; }
+  const code = r.code;
   await renderSolicitacoes();
   document.getElementById('accessCodeStatus').textContent = `✅ Código "${code}" gerado — o corretor pode verificar agora!`;
 }
@@ -1574,25 +1542,23 @@ async function criarUsuario() {
   const errEl    = document.getElementById('adminErr');
   if(!username || !name || !password) { errEl.textContent='Preencha todos os campos'; errEl.style.display='block'; return; }
   if(password.length < 4)             { errEl.textContent='Senha mínimo 4 caracteres'; errEl.style.display='block'; return; }
-  const { data: existing } = await _sb.from('nave_users').select('username').eq('username', username).single();
-  if(existing) { errEl.textContent='Usuário já existe'; errEl.style.display='block'; return; }
-  const { error } = await _sb.from('nave_users').insert({ username, name, password, role, nascimento:'' });
-  if(error) { errEl.textContent='Erro: '+error.message; errEl.style.display='block'; return; }
+  const r = await api('admin_create_user', { username, name, password, role });
+  if(r.error) { errEl.textContent=r.error; errEl.style.display='block'; return; }
   errEl.style.display = 'none';
   ['newUser','newName','newPass'].forEach(id=>document.getElementById(id).value='');
   await renderAdminUsers();
 }
 async function delUsuario(username) {
   if(!confirm(`Remover usuário @${username}?`)) return;
-  await _sb.from('nave_state').delete().eq('username', username);
-  await _sb.from('nave_users').delete().eq('username', username);
+  const r = await api('admin_delete_user', { username });
+  if(r.error) { alert(r.error); return; }
   await renderAdminUsers();
 }
 async function resetSenha(username) {
   const nova = prompt(`Nova senha para @${username}:`);
   if(!nova || nova.length < 4) { alert('Senha mínimo 4 caracteres'); return; }
-  const { error } = await _sb.from('nave_users').update({ password: nova }).eq('username', username);
-  if(!error) alert('✅ Senha alterada!');
+  const r = await api('admin_reset_password', { username, password: nova });
+  alert(r.error ? ('Erro: ' + r.error) : '✅ Senha alterada!');
 }
 
 // ══════════════════════════════════════════════

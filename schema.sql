@@ -31,21 +31,18 @@ CREATE TABLE IF NOT EXISTS nave_config (
   value TEXT NOT NULL
 );
 
--- Admin padrão
-INSERT INTO nave_users (username, name, password, role)
-VALUES ('carioca', 'Carlos Henrique', '1406', 'admin')
-ON CONFLICT DO NOTHING;
+-- Admin: criar pelo painel ou via SQL com senha em bcrypt (extensions.crypt(..., gen_salt('bf',10))).
+-- Nunca gravar senha em texto puro.
 
 -- Código de convite (vazio = bloqueado; admin gera via painel)
 INSERT INTO nave_config (key, value)
 VALUES ('access_code', '')
 ON CONFLICT DO NOTHING;
 
--- RLS: habilitar e permitir acesso via anon key (controle no app)
+-- RLS ligado e SEM policies: anon/authenticated não leem nada.
+-- Todo acesso passa pela Edge Function nave-api (service role), que confere o token de sessão.
 ALTER TABLE nave_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nave_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nave_config ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "nave_users_all"  ON nave_users  FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "nave_state_all"  ON nave_state  FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "nave_config_all" ON nave_config FOR ALL USING (true) WITH CHECK (true);
+ALTER TABLE nave_requests ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON nave_users, nave_state, nave_config, nave_requests FROM anon, authenticated;
