@@ -1534,6 +1534,7 @@ async function renderAdminUsers() {
             </div>
           </div>
           <div style="display:flex;gap:6px;align-items:center">
+            <button onclick="toggleAgente('${u.username}', ${!u.agente})" class="btn btn-sm btn-ghost" style="font-size:10px" title="Liberar ou bloquear o agente de WhatsApp">🤖 ${u.agente ? 'Agente ligado' : 'Ligar agente'}</button>
             <button onclick="resetSenha('${u.username}')" class="btn btn-sm btn-ghost" style="font-size:10px">🔑 Senha</button>
             ${u.username !== currentUser?.username ? `<button onclick="delUsuario('${u.username}')" class="btn btn-sm" style="background:var(--redbg);color:var(--red);font-size:10px">✕</button>` : '<span style="font-size:10px;color:var(--text3)">você</span>'}
           </div>
@@ -1558,6 +1559,11 @@ async function delUsuario(username) {
   if(!confirm(`Remover usuário @${username}?`)) return;
   const r = await api('admin_delete_user', { username });
   if(r.error) { alert(r.error); return; }
+  await renderAdminUsers();
+}
+async function toggleAgente(username, ligar) {
+  const r = await api('admin_set_agente', { username, agente: ligar });
+  if(r.error) { alert('Erro: ' + r.error); return; }
   await renderAdminUsers();
 }
 async function resetSenha(username) {
@@ -1630,6 +1636,15 @@ function renderAgente() {
     </div>
 
     <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔑 Chave do copiloto (Claude Code)</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Usada pelos comandos /rascunhos e /aprendizado no seu Claude Code. Só enxerga os seus clientes. Aparece uma única vez; gerar de novo cancela a anterior.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-ghost btn-sm" onclick="gerarChaveCopiloto()">Gerar nova chave</button>
+        <code id="agChave" style="font-size:11px;word-break:break-all;user-select:all"></code>
+      </div>
+    </div>
+
+    <div class="card">
       <div style="font-size:13px;font-weight:700;margin-bottom:4px">💲 Preços base (o agente só fala "a partir de")</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Edite quando a tabela mudar. Marque "passa pro humano" quando o valor não puder ser citado.</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px">
@@ -1668,6 +1683,13 @@ async function salvarAlerta() {
   msg.style.color = r.error ? 'var(--red)' : 'var(--green)';
   msg.textContent = r.error || '✅ Salvo';
   if(!r.error) { agenteData.config.alerta_numero = r.alerta_numero; document.getElementById('agAlertaNum').value = r.alerta_numero || ''; }
+}
+async function gerarChaveCopiloto() {
+  const el = document.getElementById('agChave');
+  if(el.dataset.armado !== '1') { el.dataset.armado = '1'; el.textContent = 'Clique de novo para confirmar (a chave anterior para de funcionar).'; setTimeout(() => { if(el.dataset.armado === '1') { el.dataset.armado = ''; el.textContent = ''; } }, 5000); return; }
+  el.dataset.armado = '';
+  const r = await api('agente_gerar_chave');
+  el.textContent = r.error ? r.error : r.chave + '  ← copie agora e guarde no seu cofre; ela não aparece de novo';
 }
 function editarPreco(id) { _precoEdit = agenteData.precos.find(p => p.id === id) || null; renderAgente(); document.getElementById('pEmp').focus(); }
 async function salvarPreco() {

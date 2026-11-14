@@ -198,6 +198,85 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     if (error) fail(500, error.message);
     return { ok: true };
   },
+  // Chave pessoal do copiloto (para os comandos /rascunhos e /aprendizado no Claude Code de cada um).
+  // Mostrada uma única vez; no banco fica só o hash. Gerar de novo invalida a anterior.
+  async agente_gerar_chave(_b, s) {
+    await agenteUser(s);
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const chave = "ncp_" + Array.from(bytes, (x) => x.toString(16).padStart(2, "0")).join("");
+    await db.from("agente_config").upsert({ username: s!.u, chave_copiloto_hash: await sha256hex(chave), atualizado_em: new Date().toISOString() }, { onConflict: "username" });
+    return { chave };
+  },
+  // ── Extensão do WhatsApp Web (copiloto) ──
+  async agente_painel(_b, s) {
+    await agenteUser(s);
+    const mes = new Date().toISOString().slice(0, 7);
+    const [fila, rasc, cfg, uso, lic] = await Promise.all([
+      db.from("agente_fila").select("telefone", { count: "exact", head: true }).eq("username", s!.u),
+      db.from("agente_rascunhos").select("id,telefone,mensagens,acao,motivo,prioridade,criado_em").eq("username", s!.u).eq("status", "pendente").order("prioridade", { ascending: false }).order("criado_em", { ascending: false }).limit(50),
+      db.from("agente_config").select("teto_api_mes").eq("username", s!.u).maybeSingle(),
+      db.from("agente_uso").select("api_enviadas,alertas").eq("username", s!.u).eq("mes", mes).maybeSingle(),
+      db.from("agente_licoes").select("criado_em").eq("username", s!.u).order("criado_em", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    // um rascunho por cliente (o mais recente/prioritário)
+    const vistos = new Set<string>(); const lista: any[] = [];
+    for (const r of rasc.data || []) { if (!vistos.has(r.telefone)) { vistos.add(r.telefone); lista.push(r); } }
+    const tels = lista.map((r) => r.telefone);
+    const { data: clis } = tels.length ? await db.from("agente_clientes").select("telefone,nome,origem,etapa,perfil,empreendimento,resumo,horas_resposta,msgs_cliente,audios_cliente,ultimo_msg_cliente").eq("username", s!.u).in("telefone", tels) : { data: [] };
+    const cm = new Map((clis || []).map((c: any) => [c.telefone, c]));
+    const agoraBRT = new Date(Date.now() - 3 * 3600e3);
+    const ultimaLicao = lic.data?.criado_em ? Date.parse(lic.data.criado_em) : 0;
+    const avisoAprendizado = agoraBRT.getUTCDay() === 1 && Date.now() - ultimaLicao > 5 * 864e5;
+    return {
+      pendentes_sugestao: fila.count || 0,
+      rascunhos: lista.map((r) => ({ ...r, cliente: cm.get(r.telefone) || null })),
+      cota: { usadas: Number(uso.data?.api_enviadas || 0), teto: Number(cfg.data?.teto_api_mes || 950) },
+      aviso_aprendizado: avisoAprendizado,
+    };
+  },
+  async agente_rascunho_acao(b, s) {
+    await agenteUser(s);
+    const { data: r } = await db.from("agente_rascunhos").select("*").eq("id", Number(b.id)).eq("username", s!.u).maybeSingle();
+    if (!r) fail(404, "Sugestão não encontrada");
+    if (r.status !== "pendente") fail(409, "Essa sugestão já foi tratada");
+    const msgs: string[] = (Array.isArray(b.mensagens) ? b.mensagens : r.mensagens).map((m: unknown) => String(m).trim()).filter(Boolean).slice(0, 4);
+    const agora = new Date().toISOString();
+    if (b.op === "descartar") {
+      await db.from("agente_rascunhos").update({ status: "descartado", enviado_em: agora }).eq("id", r.id);
+      return { ok: true };
+    }
+    if (b.op === "marcar_enviado") { // o Well inseriu no WhatsApp e enviou pelo app
+      await db.from("agente_rascunhos").update({ status: "enviado", canal: "whatsapp", enviado_texto: msgs, enviado_em: agora }).eq("id", r.id);
+      return { ok: true };
+    }
+    if (b.op !== "enviar_api") fail(400, "Operação inválida");
+    if (!msgs.length) fail(400, "Mensagem vazia");
+    const [cfgQ, ultQ, usoQ] = await Promise.all([
+      db.from("agente_config").select("wa_phone_number_id,teto_api_mes").eq("username", s!.u).maybeSingle(),
+      db.from("agente_mensagens").select("em").eq("username", s!.u).eq("telefone", r.telefone).eq("de", "cliente").order("em", { ascending: false }).limit(1).maybeSingle(),
+      db.from("agente_uso").select("*").eq("username", s!.u).eq("mes", agora.slice(0, 7)).maybeSingle(),
+    ]);
+    const cfg = cfgQ.data; const tok = Deno.env.get("WA_SYSTEM_TOKEN");
+    if (!cfg?.wa_phone_number_id || !tok) fail(400, "Número do WhatsApp não configurado");
+    // janela de 24h: fora dela a API só aceita template (pago) → use "Inserir no WhatsApp"
+    if (!ultQ.data?.em || Date.now() - Date.parse(ultQ.data.em) > 23.5 * 3600e3) fail(409, "Janela de 24h fechada: use 'Inserir no WhatsApp' e envie pelo app (grátis)");
+    const usadas = Number(usoQ.data?.api_enviadas || 0);
+    if (usadas + msgs.length > Number(cfg.teto_api_mes || 950) - 30) fail(409, "Cota grátis do mês no limite: use 'Inserir no WhatsApp'");
+    for (let i = 0; i < msgs.length; i++) {
+      const resp = await fetch(`https://graph.facebook.com/v21.0/${cfg.wa_phone_number_id}/messages`, {
+        method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messaging_product: "whatsapp", to: r.telefone.replace("+", ""), type: "text", text: { body: msgs[i] } }),
+      });
+      const j = await resp.json();
+      if (!resp.ok) fail(502, "WhatsApp recusou: " + (j?.error?.message || resp.status));
+      await db.from("agente_mensagens").insert({ username: s!.u, telefone: r.telefone, de: "nos", origem: "copiloto", tipo: "texto", texto: msgs[i], wa_id: j.messages?.[0]?.id, em: new Date().toISOString() });
+      if (i < msgs.length - 1) await new Promise((ok) => setTimeout(ok, 1200 + Math.random() * 1500));
+    }
+    await db.from("agente_uso").upsert({ username: s!.u, mes: agora.slice(0, 7), api_enviadas: usadas + msgs.length, alertas: Number(usoQ.data?.alertas || 0), chamadas_ia: Number(usoQ.data?.chamadas_ia || 0), custo_usd: Number(usoQ.data?.custo_usd || 0) }, { onConflict: "username,mes" });
+    await db.from("agente_rascunhos").update({ status: "enviado", canal: "api", enviado_texto: msgs, enviado_em: new Date().toISOString() }).eq("id", r.id);
+    await db.from("agente_fila").delete().eq("username", s!.u).eq("telefone", r.telefone);
+    return { ok: true, enviadas: msgs.length };
+  },
   async agente_preco_excluir(b, s) {
     await agenteUser(s);
     await db.from("agente_precos").delete().eq("id", Number(b.id)).eq("username", s!.u);
@@ -206,7 +285,7 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
 
   // ── Admin ──
   async admin_users() {
-    const { data } = await db.from("nave_users").select("username,name,role,nascimento").order("name");
+    const { data } = await db.from("nave_users").select("username,name,role,nascimento,agente").order("name");
     return { users: data || [] };
   },
   async admin_create_user(b) {
@@ -231,6 +310,13 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     if (nova.length < 4) fail(400, "Senha mínimo 4 caracteres");
     const { error } = await db.from("nave_users").update({ password: await bcrypt.hash(nova, 10) }).eq("username", normUser(b.username));
     if (error) fail(500, error.message);
+    return { ok: true };
+  },
+  async admin_set_agente(b) {
+    const username = normUser(b.username);
+    if (!(await getUser(username))) fail(404, "Usuário não encontrado");
+    await db.from("nave_users").update({ agente: !!b.agente }).eq("username", username);
+    if (b.agente) await db.from("agente_config").upsert({ username }, { onConflict: "username", ignoreDuplicates: true });
     return { ok: true };
   },
   async admin_requests() {
@@ -315,7 +401,132 @@ const agentActions: Record<string, (b: any) => Promise<unknown>> = {
     ]);
     return { config: cfg.data, precos: precos.data || [], cliente: cli.data };
   },
+
+  // ── Usado pelos comandos /rascunhos e /aprendizado (Claude Code do Well) ──
+  async agente_conhecimento(b) {
+    const username = normUser(b.username);
+    const [k, p] = await Promise.all([
+      db.from("agente_conhecimento").select("chave,conteudo").eq("username", username).order("ordem"),
+      db.from("agente_precos").select("empreendimento,bairro,tipologia,valor,entrega,bloqueado,atualizado_em").eq("username", username).order("empreendimento"),
+    ]);
+    return { conhecimento: k.data || [], precos: p.data || [] };
+  },
+  async agente_pendentes(b) {
+    const username = normUser(b.username);
+    const { data: fila } = await db.from("agente_fila").select("telefone,responder_apos").eq("username", username).order("responder_apos");
+    const out = [];
+    for (const f of fila || []) {
+      const [cli, msgs] = await Promise.all([
+        db.from("agente_clientes").select("nome,origem,origem_detalhe,etapa,perfil,empreendimento,renda,entrada,objecoes,resumo,aprendizados,horas_resposta,msgs_cliente,audios_cliente").eq("username", username).eq("telefone", f.telefone).maybeSingle(),
+        db.from("agente_mensagens").select("de,origem,tipo,texto,em").eq("username", username).eq("telefone", f.telefone).order("em", { ascending: false }).limit(20),
+      ]);
+      const c: any = cli.data || {};
+      c.aprendizados = (c.aprendizados || []).filter((a: any) => a.aprovado).map((a: any) => a.texto);
+      out.push({ telefone: f.telefone, desde: f.responder_apos, cliente: c, conversa: (msgs.data || []).reverse() });
+    }
+    return { pendentes: out };
+  },
+  async agente_rascunho_salvar(b) {
+    const username = normUser(b.username), telefone = normFone(b.telefone);
+    if (!username || !telefone) fail(400, "username e telefone obrigatórios");
+    const acao = ["responder", "passar_humano", "nao_responder"].includes(b.acao) ? b.acao : "responder";
+    const mensagens = Array.isArray(b.mensagens) ? b.mensagens.map((m: unknown) => String(m).slice(0, 2000)).slice(0, 4) : [];
+    if (acao !== "nao_responder") {
+      await db.from("agente_rascunhos").insert({ username, telefone, mensagens, acao, motivo: b.motivo || b.motivo_alerta || null, prioridade: Number(b.prioridade) || null, status: "pendente", modelo: "assinatura" });
+    }
+    await agentActions.agente_cliente({ username, telefone, campos: { ...(b.perfil || {}), objecoes: b.objecoes || [], passado_humano: acao === "passar_humano" }, aprendizado: b.aprendizado || undefined });
+    await db.from("agente_fila").delete().eq("username", username).eq("telefone", telefone);
+    let alerta = false;
+    if (b.quente || acao === "passar_humano") {
+      const { data: cfg } = await db.from("agente_config").select("alerta_numero,alerta_ativo,wa_phone_number_id").eq("username", username).maybeSingle();
+      const tok = Deno.env.get("WA_SYSTEM_TOKEN");
+      if (cfg?.alerta_ativo && cfg.alerta_numero && cfg.wa_phone_number_id && tok) {
+        const { data: cli } = await db.from("agente_clientes").select("nome").eq("username", username).eq("telefone", telefone).maybeSingle();
+        const motivo = acao === "passar_humano" ? `precisa de você: ${b.motivo || ""}` : `lead quente: ${b.motivo_alerta || ""}`;
+        const r = await fetch(`https://graph.facebook.com/v21.0/${cfg.wa_phone_number_id}/messages`, {
+          method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ messaging_product: "whatsapp", to: cfg.alerta_numero.replace("+", ""), type: "text", text: { body: `🔔 ${cli?.nome || telefone} (${telefone})\n${motivo}\nAbrir conversa: https://wa.me/${telefone.replace("+", "")}` } }),
+        });
+        alerta = r.ok;
+        if (r.ok) {
+          const mes = new Date().toISOString().slice(0, 7);
+          const { data: u } = await db.from("agente_uso").select("*").eq("username", username).eq("mes", mes).maybeSingle();
+          await db.from("agente_uso").upsert({ username, mes, api_enviadas: Number(u?.api_enviadas || 0) + 1, alertas: Number(u?.alertas || 0) + 1, chamadas_ia: Number(u?.chamadas_ia || 0), custo_usd: Number(u?.custo_usd || 0) }, { onConflict: "username,mes" });
+        }
+      }
+    }
+    return { ok: true, alerta };
+  },
+  // Números do aprendizado (sem IA): o que fez o cliente responder em até 72h.
+  async agente_aprendizado_dados(b) {
+    const username = normUser(b.username);
+    const dias = Math.min(Number(b.dias) || 30, 180);
+    const desde = new Date(Date.now() - dias * 864e5).toISOString();
+    const [msgsQ, rascQ, cliQ, licQ] = await Promise.all([
+      db.from("agente_mensagens").select("telefone,de,origem,tipo,texto,em").eq("username", username).gte("em", desde).order("em"),
+      db.from("agente_rascunhos").select("telefone,mensagens,enviado_texto,status,canal,prioridade,criado_em").eq("username", username).gte("criado_em", desde),
+      db.from("agente_clientes").select("telefone,etapa,perfil,origem,aprendizados").eq("username", username),
+      db.from("agente_licoes").select("titulo,status,semana").eq("username", username).order("criado_em", { ascending: false }).limit(30),
+    ]);
+    const msgs = msgsQ.data || [];
+    const perfilDe = new Map((cliQ.data || []).map((c: any) => [c.telefone, c.perfil || "indefinido"]));
+    const porTel = new Map<string, any[]>();
+    for (const m of msgs) { if (!porTel.has(m.telefone)) porTel.set(m.telefone, []); porTel.get(m.telefone)!.push(m); }
+    const grupos: Record<string, { enviadas: number; respondidas: number; minutos: number[] }> = {};
+    const add = (k: string, resp: boolean, min?: number) => {
+      const g = grupos[k] ||= { enviadas: 0, respondidas: 0, minutos: [] };
+      g.enviadas++; if (resp) { g.respondidas++; if (min != null) g.minutos.push(min); }
+    };
+    const exemplos: any[] = [];
+    for (const [tel, lista] of porTel) {
+      for (let i = 0; i < lista.length; i++) {
+        const m = lista[i];
+        if (m.de !== "nos") continue;
+        if (lista[i + 1]?.de === "nos") continue; // conta só a última de uma sequência nossa
+        const prox = lista.slice(i + 1).find((x) => x.de === "cliente");
+        const min = prox ? (Date.parse(prox.em) - Date.parse(m.em)) / 60000 : null;
+        const resp = min != null && min <= 72 * 60;
+        const h = (new Date(m.em).getUTCHours() + 21) % 24; // BRT
+        const faixa = h < 9 ? "antes 9h" : h < 12 ? "9h-12h" : h < 15 ? "12h-15h" : h < 18 ? "15h-18h" : h < 21 ? "18h-21h" : "depois 21h";
+        add(`origem:${m.origem || "?"}`, resp, min ?? undefined);
+        add(`tipo:${m.tipo}`, resp, min ?? undefined);
+        add(`horario:${faixa}`, resp, min ?? undefined);
+        add(`perfil:${perfilDe.get(tel) || "indefinido"}`, resp, min ?? undefined);
+        if (exemplos.length < 60 && m.texto) exemplos.push({ texto: m.texto.slice(0, 300), origem: m.origem, respondeu: resp });
+      }
+    }
+    const resumo = Object.fromEntries(Object.entries(grupos).map(([k, g]) => {
+      const s = [...g.minutos].sort((a, b) => a - b);
+      return [k, { enviadas: g.enviadas, respondidas: g.respondidas, taxa: g.enviadas ? Math.round(g.respondidas / g.enviadas * 100) : 0, mediana_min: s.length ? Math.round(s[Math.floor(s.length / 2)]) : null }];
+    }));
+    const rasc = rascQ.data || [];
+    const edicoes = rasc.filter((r: any) => r.enviado_texto && JSON.stringify(r.enviado_texto) !== JSON.stringify(r.mensagens))
+      .slice(0, 30).map((r: any) => ({ sugerido: r.mensagens, enviado: r.enviado_texto }));
+    const etapas: Record<string, number> = {};
+    for (const c of cliQ.data || []) etapas[c.etapa || "?"] = (etapas[c.etapa || "?"] || 0) + 1;
+    return {
+      periodo_dias: dias, conversas: porTel.size, resumo, exemplos, edicoes,
+      rascunhos: { total: rasc.length, enviados: rasc.filter((r: any) => r.status === "enviado").length, descartados: rasc.filter((r: any) => r.status === "descartado").length },
+      etapas, licoes_anteriores: licQ.data || [],
+      aprendizados_a_aprovar: (cliQ.data || []).flatMap((c: any) => (c.aprendizados || []).filter((a: any) => !a.aprovado).map((a: any) => ({ telefone: c.telefone, texto: a.texto }))),
+    };
+  },
+  async agente_licoes_salvar(b) {
+    const username = normUser(b.username);
+    const semana = String(b.semana || new Date().toISOString().slice(0, 10));
+    const rows = (Array.isArray(b.licoes) ? b.licoes : []).slice(0, 10).map((l: any) => ({
+      username, semana, titulo: String(l.titulo || "").slice(0, 200), detalhe: l.detalhe ? String(l.detalhe).slice(0, 2000) : null,
+      evidencia: l.evidencia ? String(l.evidencia).slice(0, 1000) : null, amostra: Number(l.amostra) || null,
+    })).filter((r: any) => r.titulo);
+    if (rows.length) { const { error } = await db.from("agente_licoes").insert(rows); if (error) fail(500, error.message); }
+    return { ok: true, salvas: rows.length };
+  },
 };
+const COPILOTO_ACOES = new Set(["agente_conhecimento", "agente_pendentes", "agente_rascunho_salvar", "agente_aprendizado_dados", "agente_licoes_salvar"]);
+async function sha256hex(s: string) {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
+  return Array.from(d, (x) => x.toString(16).padStart(2, "0")).join("");
+}
 function safeEq(a: string, b: string) {
   if (!a || a.length !== b.length) return false;
   let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -336,6 +547,17 @@ Deno.serve(async (req) => {
     if (req.method !== "POST") fail(405, "Método não permitido");
     const b = await req.json().catch(() => ({}));
     if (agentActions[b.action]) {
+      // Comandos do Claude Code de cada corretor: chave pessoal do copiloto → só os dados DELE (username vem da chave).
+      const ck = req.headers.get("x-copiloto-key");
+      if (ck) {
+        if (!COPILOTO_ACOES.has(b.action)) fail(403, "Ação não permitida para a chave do copiloto");
+        const hash = await sha256hex(ck);
+        const { data: cfg } = await db.from("agente_config").select("username").eq("chave_copiloto_hash", hash).maybeSingle();
+        if (!cfg) fail(401, "Chave do copiloto inválida");
+        return json(200, await agentActions[b.action]({ ...b, username: cfg!.username }));
+      }
+      // Chave do servidor (webhook): só as ações internas.
+      if (COPILOTO_ACOES.has(b.action)) fail(403, "Use a chave do copiloto");
       if (!safeEq(req.headers.get("x-agent-key") || "", AGENT_KEY)) fail(401, "Chave do agente inválida");
       return json(200, await agentActions[b.action](b));
     }
