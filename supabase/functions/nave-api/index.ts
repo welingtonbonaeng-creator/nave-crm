@@ -208,6 +208,81 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     await db.from("agente_config").upsert({ username: s!.u, chave_copiloto_hash: await sha256hex(chave), atualizado_em: new Date().toISOString() }, { onConflict: "username" });
     return { chave };
   },
+  // ── CRM: placar + movimentações automáticas ──
+  async agente_movimentos(_b, s) {
+    await agenteUser(s);
+    const H3 = 3 * 3600e3;
+    const inicioDia = new Date(Math.floor((Date.now() - H3) / 864e5) * 864e5 + H3).toISOString();
+    const mes = new Date().toISOString().slice(0, 7);
+    const [msgs, rasc, hoje, fila, uso, cfg, db_tam, licP] = await Promise.all([
+      db.from("agente_mensagens").select("telefone,de,origem,tipo,texto,em").eq("username", s!.u).order("em", { ascending: false }).limit(40),
+      db.from("agente_rascunhos").select("telefone,status,canal,acao,prioridade,criado_em,enviado_em,mensagens,enviado_texto").eq("username", s!.u).order("criado_em", { ascending: false }).limit(40),
+      db.from("agente_mensagens").select("telefone").eq("username", s!.u).eq("de", "cliente").gte("em", inicioDia),
+      db.from("agente_fila").select("telefone", { count: "exact", head: true }).eq("username", s!.u),
+      db.from("agente_uso").select("api_enviadas,alertas").eq("username", s!.u).eq("mes", mes).maybeSingle(),
+      db.from("agente_config").select("teto_api_mes").eq("username", s!.u).maybeSingle(),
+      db.rpc("agente_db_tamanho"),
+      db.from("agente_licoes").select("id", { count: "exact", head: true }).eq("username", s!.u).eq("status", "pendente"),
+    ]);
+    const tels = new Set<string>();
+    for (const m of msgs.data || []) tels.add(m.telefone);
+    for (const r of rasc.data || []) tels.add(r.telefone);
+    const { data: clis } = tels.size ? await db.from("agente_clientes").select("telefone,nome").eq("username", s!.u).in("telefone", [...tels]) : { data: [] };
+    const nome = new Map((clis || []).map((c: any) => [c.telefone, c.nome]));
+    const ev: any[] = [];
+    for (const m of msgs.data || []) {
+      const quem = m.de === "cliente" ? "cliente" : m.origem === "app" ? "voce_app" : m.origem === "copiloto" ? "copiloto" : "nos";
+      ev.push({ em: m.em, tipo: quem, telefone: m.telefone, nome: nome.get(m.telefone) || null, texto: m.texto ? m.texto.slice(0, 140) : `(${m.tipo})` });
+    }
+    for (const r of rasc.data || []) {
+      ev.push({ em: r.criado_em, tipo: r.acao === "passar_humano" ? "precisa_voce" : "sugestao", telefone: r.telefone, nome: nome.get(r.telefone) || null, texto: (r.mensagens || [])[0]?.slice(0, 140) || "", prioridade: r.prioridade });
+      if (r.enviado_em && r.status !== "pendente") {
+        const editada = r.enviado_texto && JSON.stringify(r.enviado_texto) !== JSON.stringify(r.mensagens);
+        ev.push({ em: r.enviado_em, tipo: r.status === "descartado" ? "descartada" : editada ? "enviada_editada" : "enviada", canal: r.canal, telefone: r.telefone, nome: nome.get(r.telefone) || null, texto: "" });
+      }
+    }
+    ev.sort((a, b) => Date.parse(b.em) - Date.parse(a.em));
+    const agoraBRT = new Date(Date.now() - H3);
+    return {
+      placar: {
+        conversas_hoje: new Set((hoje.data || []).map((m: any) => m.telefone)).size, meta_dia: 10,
+        api_usadas: Number(uso.data?.api_enviadas || 0), api_teto: Number(cfg.data?.teto_api_mes || 950), alertas_mes: Number(uso.data?.alertas || 0),
+        banco_mb: Math.round(Number(db_tam.data || 0) / 1048576), banco_limite_mb: 500,
+        pendentes_sugestao: fila.count || 0, licoes_pendentes: licP.count || 0,
+        dia_aprendizado: agoraBRT.getUTCDay() === 1,
+      },
+      movimentos: ev.slice(0, 60),
+    };
+  },
+  // ── CRM: aprendizado (aprovar/recusar) ──
+  async agente_licoes(_b, s) {
+    await agenteUser(s);
+    const [l, c] = await Promise.all([
+      db.from("agente_licoes").select("*").eq("username", s!.u).order("criado_em", { ascending: false }).limit(60),
+      db.from("agente_clientes").select("telefone,nome,aprendizados").eq("username", s!.u),
+    ]);
+    const porCliente = (c.data || []).flatMap((x: any) => (x.aprendizados || []).map((a: any, i: number) => ({ telefone: x.telefone, nome: x.nome, indice: i, ...a })));
+    return { licoes: l.data || [], aprendizados_clientes: porCliente.filter((a: any) => !a.aprovado) };
+  },
+  async agente_licao_decidir(b, s) {
+    await agenteUser(s);
+    const status = b.status === "aprovada" ? "aprovada" : b.status === "recusada" ? "recusada" : null;
+    if (!status) fail(400, "Status inválido");
+    const { error } = await db.from("agente_licoes").update({ status, decidido_em: new Date().toISOString() }).eq("id", Number(b.id)).eq("username", s!.u);
+    if (error) fail(500, error.message);
+    return { ok: true };
+  },
+  async agente_aprendizado_cliente_decidir(b, s) {
+    await agenteUser(s);
+    const telefone = normFone(b.telefone);
+    const { data } = await db.from("agente_clientes").select("aprendizados").eq("username", s!.u).eq("telefone", telefone).maybeSingle();
+    const lista = [...(data?.aprendizados || [])];
+    const i = Number(b.indice);
+    if (!lista[i]) fail(404, "Aprendizado não encontrado");
+    if (b.aprovar) lista[i] = { ...lista[i], aprovado: true }; else lista.splice(i, 1);
+    await db.from("agente_clientes").update({ aprendizados: lista }).eq("username", s!.u).eq("telefone", telefone);
+    return { ok: true };
+  },
   // ── Extensão do WhatsApp Web (copiloto) ──
   async agente_painel(_b, s) {
     await agenteUser(s);
@@ -412,7 +487,11 @@ const agentActions: Record<string, (b: any) => Promise<unknown>> = {
       db.from("agente_conhecimento").select("chave,conteudo").eq("username", username).order("ordem"),
       db.from("agente_precos").select("empreendimento,bairro,tipologia,valor,entrega,bloqueado,atualizado_em").eq("username", username).order("empreendimento"),
     ]);
-    return { conhecimento: k.data || [], precos: p.data || [] };
+    // lições aprovadas pelo Well entram como regra nas próximas sugestões
+    const { data: lic } = await db.from("agente_licoes").select("titulo,detalhe").eq("username", username).eq("status", "aprovada").order("criado_em");
+    const conhecimento = [...(k.data || [])];
+    if (lic?.length) conhecimento.push({ chave: "licoes_aprovadas", conteudo: "Regras aprendidas e aprovadas pelo Well (seguir sempre):\n" + lic.map((l: any) => `- ${l.titulo}${l.detalhe ? ": " + l.detalhe : ""}`).join("\n") });
+    return { conhecimento, precos: p.data || [] };
   },
   async agente_pendentes(b) {
     const username = normUser(b.username);
