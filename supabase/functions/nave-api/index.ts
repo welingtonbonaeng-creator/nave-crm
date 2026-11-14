@@ -9,6 +9,7 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 const SECRET = Deno.env.get("NAVE_SESSION_SECRET")!;
 const ORIGINS = ["https://welingtonbonaeng-creator.github.io", "http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5500"];
 const SESSION_DAYS = 30;
+const DONO = Deno.env.get("NAVE_DONO") || "well"; // dono do produto: único que libera o agente
 
 const enc = new TextEncoder();
 const b64u = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -312,7 +313,9 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     if (error) fail(500, error.message);
     return { ok: true };
   },
-  async admin_set_agente(b) {
+  async admin_set_agente(b, s) {
+    // Só o dono do produto liga/desliga o agente (outros admins, se houver, não)
+    if (s!.u !== DONO) fail(403, "Só o dono do sistema libera o agente");
     const username = normUser(b.username);
     if (!(await getUser(username))) fail(404, "Usuário não encontrado");
     await db.from("nave_users").update({ agente: !!b.agente }).eq("username", username);

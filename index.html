@@ -1534,7 +1534,7 @@ async function renderAdminUsers() {
             </div>
           </div>
           <div style="display:flex;gap:6px;align-items:center">
-            <button onclick="toggleAgente('${u.username}', ${!u.agente})" class="btn btn-sm btn-ghost" style="font-size:10px" title="Liberar ou bloquear o agente de WhatsApp">🤖 ${u.agente ? 'Agente ligado' : 'Ligar agente'}</button>
+            ${currentUser?.username === 'well' ? `<button onclick="toggleAgente('${u.username}', ${!u.agente})" class="btn btn-sm btn-ghost" style="font-size:10px" title="Liberar ou bloquear o agente de WhatsApp">🤖 ${u.agente ? 'Agente ligado' : 'Ligar agente'}</button>` : ''}
             <button onclick="resetSenha('${u.username}')" class="btn btn-sm btn-ghost" style="font-size:10px">🔑 Senha</button>
             ${u.username !== currentUser?.username ? `<button onclick="delUsuario('${u.username}')" class="btn btn-sm" style="background:var(--redbg);color:var(--red);font-size:10px">✕</button>` : '<span style="font-size:10px;color:var(--text3)">você</span>'}
           </div>
