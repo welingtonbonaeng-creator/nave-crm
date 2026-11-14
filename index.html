@@ -562,7 +562,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
     <div class="nav-section">Relatórios</div>
     <div class="nav-item" onclick="showPage('vendas')"><span class="ico">💰</span><span>Vendas</span></div>
     <div class="nav-item" id="navMetas" style="display:none" onclick="showPage('metas')"><span class="ico">🎯</span><span>Painel de Metas</span></div>
-    <div class="nav-item" id="navAgente" style="display:none" onclick="showPage('agente')"><span class="ico">🤖</span><span>Agente</span></div>
+    <div class="nav-item" id="navAgente" style="display:none" onclick="showPage('agente')"><span class="ico">🤖</span><span>Agente</span><span class="nav-badge" id="badgeSemResp" style="display:none;background:var(--red);color:#fff" title="Conversas sem resposta">0</span></div>
   </nav>
   <div class="sidebar-footer">
     <div class="user-row" style="margin-bottom:8px">
@@ -593,6 +593,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 
     <!-- ═══ DASHBOARD ═══ -->
     <div class="page active" id="pageDashboard">
+      <div id="semRespDash" style="margin-bottom:16px"></div>
       <div class="stats-grid" id="statsGrid"></div>
       <div class="grid-2">
         <div class="card">
@@ -1377,7 +1378,7 @@ async function loadUserState(username) {
   } catch(e) { console.warn('loadUserState:', e); }
   hideLoading();
   render();
-  if(currentUser?.agente) syncAgente();
+  if(currentUser?.agente) { syncAgente(); carregarSemResposta(); }
 }
 // Salva a cada 20 segundos em background
 setInterval(() => { if(currentUser) saveUserState(); }, 20000);
@@ -1661,6 +1662,49 @@ async function syncAgente() {
 setInterval(() => { if(currentUser?.agente) syncAgente(); }, 60000);
 
 // ══════════════════════════════════════════════
+// CONVERSAS SEM RESPOSTA (rede de segurança contra esquecimento)
+// ══════════════════════════════════════════════
+let agenteSemResp = [];
+const fmtEspera = m => m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m/60)}h${String(m%60).padStart(2,'0')}` : `${Math.floor(m/1440)} dia(s)`;
+function htmlSemResposta(compacto) {
+  if(!agenteSemResp.length) return '';
+  const itens = agenteSemResp.map(c => {
+    const urg = c.minutos >= 120;
+    const janela = c.janela_h > 0 ? `janela grátis fecha em ${String(c.janela_h).replace('.', ',')}h` : 'janela de 24h fechada: responda pelo app';
+    return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:13px"><b>${escA(c.nome || c.telefone)}</b> <span style="color:${urg ? 'var(--red)' : 'var(--yellow)'};font-weight:700">· esperando há ${fmtEspera(c.minutos)}</span>${c.tem_sugestao ? ' <span class="badge badge-accent">sugestão pronta</span>' : ''}</div>
+        <div style="font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">“${escA(c.texto)}”</div>
+        <div style="font-size:11px;color:${c.janela_h > 0 && c.janela_h < 4 ? 'var(--red)' : 'var(--text3)'}">${janela}</div>
+      </div>
+      <a class="btn btn-primary btn-sm" style="text-decoration:none" href="https://web.whatsapp.com/send?phone=${String(c.telefone).replace(/\D/g,'')}" target="_blank" rel="noopener">Abrir no WhatsApp</a>
+      <button class="btn btn-ghost btn-sm" onclick="dispensarSemResp('${escA(c.telefone)}')" title="Já resolvi por fora">Dispensar</button>
+    </div>`;
+  }).join('');
+  return `<div class="card" style="border-color:var(--red)">
+    <div style="font-size:13px;font-weight:700;color:var(--red)">🔴 ${agenteSemResp.length} conversa(s) sem resposta</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:4px">O cliente escreveu e ninguém respondeu há mais de 30 minutos.</div>
+    <div style="${compacto ? 'max-height:260px;overflow:auto' : ''}">${itens}</div></div>`;
+}
+async function carregarSemResposta() {
+  if(!currentUser?.agente) return;
+  const r = await api('agente_sem_resposta');
+  if(r.error) return;
+  agenteSemResp = r.conversas || [];
+  const b = document.getElementById('badgeSemResp');
+  if(b) { b.textContent = agenteSemResp.length; b.style.display = agenteSemResp.length ? '' : 'none'; }
+  const d = document.getElementById('semRespDash');
+  if(d) d.innerHTML = htmlSemResposta(true);
+}
+async function dispensarSemResp(telefone) {
+  await api('agente_sem_resposta_dispensar', { telefone });
+  await carregarSemResposta();
+  const pg = document.getElementById('pageAgente');
+  if(pg && pg.classList.contains('active')) renderAgente();
+}
+setInterval(carregarSemResposta, 60000);
+
+// ══════════════════════════════════════════════
 // AGENTE (alertas, preços base, perfil vivo)
 // ══════════════════════════════════════════════
 let agenteData = { config:{}, precos:[], clientes:[] };
@@ -1684,6 +1728,7 @@ async function loadAgente() {
   const el = document.getElementById('agenteContent');
   if(r.error) { el.innerHTML = `<div class="empty"><p>${escA(r.error)}</p></div>`; return; }
   agenteData = r; agenteMov = m.error ? null : m; agenteLic = l.error ? null : l;
+  await carregarSemResposta();
   // não redesenha enquanto a pessoa digita num campo da aba
   const foco = document.activeElement;
   if(foco && el.contains(foco) && /INPUT|TEXTAREA|SELECT/.test(foco.tagName)) return;
@@ -1782,6 +1827,7 @@ function renderAgente() {
   };
   el.innerHTML = `
   <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:16px">
+    ${htmlSemResposta(false)}
     ${htmlPlacar()}
     ${htmlMovimentos()}
     ${htmlAprendizado()}

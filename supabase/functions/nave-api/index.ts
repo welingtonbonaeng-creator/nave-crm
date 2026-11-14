@@ -239,6 +239,46 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     await db.from("agente_clientes").update({ etapa, atualizado_em: new Date().toISOString() }).eq("username", s!.u).eq("telefone", telefone);
     return { ok: true };
   },
+  // ── CRM: conversas esquecidas (última mensagem é do cliente e ninguém respondeu) ──
+  async agente_sem_resposta(b, s) {
+    await agenteUser(s);
+    const minimoMin = Math.max(Number(b.minutos) || 30, 5);
+    const desde = new Date(Date.now() - 7 * 864e5).toISOString();
+    const [msgs, clis, rasc] = await Promise.all([
+      db.from("agente_mensagens").select("telefone,de,texto,tipo,em").eq("username", s!.u).gte("em", desde).order("em", { ascending: false }).limit(2000),
+      db.from("agente_clientes").select("telefone,nome,sem_resposta_dispensado_em,crm_ignorar").eq("username", s!.u),
+      db.from("agente_rascunhos").select("telefone").eq("username", s!.u).eq("status", "pendente"),
+    ]);
+    const cm = new Map((clis.data || []).map((c: any) => [c.telefone, c]));
+    const comSugestao = new Set((rasc.data || []).map((r: any) => r.telefone));
+    const ultima = new Map<string, any>();
+    for (const m of msgs.data || []) if (!ultima.has(m.telefone)) ultima.set(m.telefone, m);
+    // mensagem que não pede resposta: até 4 palavras, todas de agradecimento/confirmação ou emoji
+    const PALAVRAS_OK = new Set(["ok", "okk", "okay", "blz", "beleza", "obrigado", "obrigada", "obg", "brigado", "vlw", "valeu", "show", "top", "fechou", "certo", "perfeito", "joia", "jóia", "tá", "ta", "bom", "entendi", "combinado", "tmj"]);
+    const trivial = (t: string) => {
+      const tk = t.toLowerCase().replace(/[.!,;:]/g, " ").split(/\s+/).filter(Boolean);
+      return tk.length > 0 && tk.length <= 4 && tk.every((w) => PALAVRAS_OK.has(w) || /^[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}‍️]+$/u.test(w));
+    };
+    const agora = Date.now(); const lista: any[] = [];
+    for (const [tel, m] of ultima) {
+      if (m.de !== "cliente") continue;
+      const c: any = cm.get(tel) || {};
+      if (c.crm_ignorar) continue;
+      if (m.tipo === "texto" && m.texto && trivial(m.texto)) continue;
+      if (c.sem_resposta_dispensado_em && Date.parse(c.sem_resposta_dispensado_em) >= Date.parse(m.em)) continue;
+      const min = Math.round((agora - Date.parse(m.em)) / 60000);
+      if (min < minimoMin) continue;
+      lista.push({ telefone: tel, nome: c.nome || null, texto: m.texto ? m.texto.slice(0, 160) : `(${m.tipo})`, em: m.em, minutos: min,
+        janela_h: Math.max(0, Math.round((24 * 60 - min) / 6) / 10), tem_sugestao: comSugestao.has(tel) });
+    }
+    lista.sort((a, b) => b.minutos - a.minutos);
+    return { conversas: lista };
+  },
+  async agente_sem_resposta_dispensar(b, s) {
+    await agenteUser(s);
+    await db.from("agente_clientes").update({ sem_resposta_dispensado_em: new Date().toISOString() }).eq("username", s!.u).eq("telefone", normFone(b.telefone));
+    return { ok: true };
+  },
   // ── CRM: placar + movimentações automáticas ──
   async agente_movimentos(_b, s) {
     await agenteUser(s);
