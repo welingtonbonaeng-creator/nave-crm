@@ -1663,6 +1663,62 @@ async function syncAgente() {
 setInterval(() => { if(currentUser?.agente) syncAgente(); }, 60000);
 
 // ══════════════════════════════════════════════
+// PAINEL DE METAS: bloco automático "Conversas WhatsApp" (separado dos lançamentos manuais)
+// ══════════════════════════════════════════════
+const _metasAgCache = {};
+async function renderMetasAgente() {
+  if(!currentUser?.agente) return;
+  const box = document.getElementById('metasContent'); if(!box) return;
+  const now = new Date();
+  const ano = Number.isInteger(state.metasAno) ? state.metasAno : now.getFullYear();
+  const mes = Number.isInteger(state.metasMes) ? state.metasMes : now.getMonth();
+  const chave = `${ano}-${mes}`;
+  let c = _metasAgCache[chave];
+  if(!c || Date.now() - c.t > 60000) {
+    const r = await api('agente_conversas_mes', { ano, mes });
+    if(r.error) return;
+    c = _metasAgCache[chave] = { t: Date.now(), d: r };
+  }
+  const { por_dia, clientes_unicos_mes, meta_dia } = c.d;
+  const diasNoMes = new Date(ano, mes + 1, 0).getDate();
+  const ehMesAtual = ano === now.getFullYear() && mes === now.getMonth();
+  const diaHoje = ehMesAtual ? now.getDate() : diasNoMes;
+  const hojeStr = `${ano}-${String(mes+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const somaDias = Object.values(por_dia).reduce((a,b) => a+b, 0);
+  const metaMes = meta_dia * diasNoMes, metaAteHoje = meta_dia * diaHoje;
+  const hoje = ehMesAtual ? (por_dia[hojeStr] || 0) : null;
+  const ritmo = metaAteHoje ? Math.round(somaDias / metaAteHoje * 100) : 0;
+  const maxDia = Math.max(meta_dia, ...Object.values(por_dia));
+  const barras = Array.from({ length: diasNoMes }, (_, i) => {
+    const d = `${ano}-${String(mes+1).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`;
+    const v = por_dia[d] || 0, futuro = ehMesAtual && i+1 > now.getDate();
+    const cor = futuro ? 'var(--bg4)' : v >= meta_dia ? 'var(--green)' : v > 0 ? 'var(--yellow)' : 'var(--red)';
+    return `<div title="Dia ${i+1}: ${v} conversa(s)" style="flex:1;min-width:3px;display:flex;flex-direction:column;justify-content:flex-end;height:48px">
+      <div style="height:${futuro ? 3 : Math.max(3, Math.round(v / maxDia * 48))}px;background:${cor};border-radius:2px"></div></div>`;
+  }).join('');
+  let el = document.getElementById('metasAgente');
+  if(!el) { el = document.createElement('div'); el.id = 'metasAgente'; el.style.marginBottom = '16px'; }
+  if(box.firstChild !== el) box.prepend(el);
+  el.innerHTML = `<div class="card" style="border-color:var(--accent)">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="font-size:13px;font-weight:700;flex:1">📲 Conversas WhatsApp (automático)</div>
+      <span style="font-size:11px;color:var(--text3)">clientes que escreveram no seu número · não entra na soma dos lançamentos manuais</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:12px">
+      ${hoje !== null ? `<div><div style="font-size:11px;color:var(--text3)">Hoje</div><div style="font-size:22px;font-weight:700;color:${hoje >= meta_dia ? 'var(--green)' : 'inherit'}">${hoje}/${meta_dia}</div></div>` : ''}
+      <div><div style="font-size:11px;color:var(--text3)">No mês (soma dos dias)</div><div style="font-size:22px;font-weight:700">${somaDias}/${metaMes}</div></div>
+      <div><div style="font-size:11px;color:var(--text3)">Ritmo até ${ehMesAtual ? 'hoje' : 'o fim do mês'}</div><div style="font-size:22px;font-weight:700;color:${ritmo >= 100 ? 'var(--green)' : ritmo >= 70 ? 'var(--yellow)' : 'var(--red)'}">${ritmo}%</div></div>
+      <div><div style="font-size:11px;color:var(--text3)">Clientes diferentes no mês</div><div style="font-size:22px;font-weight:700">${clientes_unicos_mes}</div></div>
+    </div>
+    <div style="display:flex;gap:2px;align-items:flex-end" aria-label="Conversas por dia">${barras}</div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px"><span>dia 1</span><span>🟩 bateu 10 · 🟨 abaixo · 🟥 zero</span><span>dia ${diasNoMes}</span></div>
+  </div>`;
+}
+// toda vez que o Painel de Metas redesenhar (troca de mês, lançamento), o bloco automático volta junto
+const _renderMetasManual = renderMetas;
+renderMetas = function() { _renderMetasManual(); renderMetasAgente(); };
+
+// ══════════════════════════════════════════════
 // 🔥 QUENTES (o agente marca; você pode marcar/desmarcar e sua escolha manda)
 // ══════════════════════════════════════════════
 let filtroQuentes = false, agenteQuentes = [];

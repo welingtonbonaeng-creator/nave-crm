@@ -239,6 +239,24 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     await db.from("agente_clientes").update({ etapa, atualizado_em: new Date().toISOString() }).eq("username", s!.u).eq("telefone", telefone);
     return { ok: true };
   },
+  // ── Painel de Metas: conversas por dia (clientes distintos que escreveram), no horário de Brasília ──
+  async agente_conversas_mes(b, s) {
+    await agenteUser(s);
+    const ano = Number(b.ano), mes = Number(b.mes); // mes 0-11
+    if (!(ano > 2000) || !(mes >= 0 && mes <= 11)) fail(400, "Mês inválido");
+    const H3 = 3 * 3600e3;
+    const ini = new Date(Date.UTC(ano, mes, 1) + H3).toISOString();
+    const fim = new Date(Date.UTC(ano, mes + 1, 1) + H3).toISOString();
+    const { data } = await db.from("agente_mensagens").select("telefone,em").eq("username", s!.u).eq("de", "cliente").gte("em", ini).lt("em", fim).limit(20000);
+    const dias: Record<string, Set<string>> = {};
+    for (const m of data || []) {
+      const d = new Date(Date.parse(m.em) - H3).toISOString().slice(0, 10);
+      (dias[d] ||= new Set()).add(m.telefone);
+    }
+    const porDia = Object.fromEntries(Object.entries(dias).map(([d, set]) => [d, set.size]));
+    const totalMes = new Set((data || []).map((m: any) => m.telefone)).size; // clientes únicos no mês
+    return { por_dia: porDia, clientes_unicos_mes: totalMes, meta_dia: 10 };
+  },
   // ── 🔥 Quentes: marcados pelo agente (quente ou prioridade ≥ 7) ou por você; sua marcação manda ──
   async agente_quentes(_b, s) {
     await agenteUser(s);
