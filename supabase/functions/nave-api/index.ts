@@ -42,7 +42,7 @@ function randomCode(n = 8) {
 }
 const publicUser = (u: any) => ({ username: u.username, name: u.name, role: u.role, nascimento: u.nascimento || "", agente: !!u.agente });
 const AGENT_KEY = Deno.env.get("NAVE_AGENT_KEY") || "";
-const normFone = (s: unknown) => { const d = String(s || "").replace(/\D/g, ""); return d ? "+" + d : ""; };
+const normFone = (s: unknown) => { const t = String(s || "").trim(); if (/^wa:[a-z0-9-]+$/.test(t)) return t; /* conversa capturada sem número: chave pelo nome */ const d = t.replace(/\D/g, ""); return d ? "+" + d : ""; };
 // hora/dia no fuso de Brasília (o agente responde no horário do Well)
 function brt(iso: string) {
   const d = new Date(iso);
@@ -390,6 +390,33 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     return { ok: true };
   },
   // ── Extensão do WhatsApp Web (copiloto) ──
+  // A extensão lê as últimas mensagens visíveis da conversa aberta e pede sugestão (vai pra fila do /rascunhos).
+  async agente_captura(b, s) {
+    await agenteUser(s);
+    const nome = String(b.nome || "").trim().slice(0, 120);
+    let telefone = normFone(b.telefone);
+    if (!telefone || telefone.length < 11) {
+      if (!nome) fail(400, "Não consegui identificar a conversa");
+      // sem número visível (WhatsApp esconde em algumas conversas): chave pelo nome
+      telefone = "wa:" + nome.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+    }
+    const msgs = (Array.isArray(b.mensagens) ? b.mensagens : []).slice(-30);
+    if (!msgs.length) fail(400, "Nenhuma mensagem visível na conversa");
+    const { data: ex } = await db.from("agente_clientes").select("telefone").eq("username", s!.u).eq("telefone", telefone).maybeSingle();
+    if (!ex) await db.from("agente_clientes").insert({ username: s!.u, telefone, nome: nome || null, origem: "WhatsApp (tela)" });
+    else if (nome) await db.from("agente_clientes").update({ nome }).eq("username", s!.u).eq("telefone", telefone).is("nome", null);
+    let novas = 0;
+    for (const m of msgs) {
+      const de = m.de === "nos" ? "nos" : "cliente";
+      const texto = String(m.texto || "").slice(0, 4000);
+      const em = m.em && !isNaN(Date.parse(m.em)) ? new Date(m.em).toISOString() : new Date().toISOString();
+      const chave = await sha256hex(`${telefone}|${de}|${em.slice(0, 16)}|${texto}`);
+      const { error } = await db.from("agente_mensagens").insert({ username: s!.u, telefone, de, origem: de === "cliente" ? "tela" : "app", tipo: m.tipo === "audio" ? "audio" : "texto", texto: texto || null, wa_id: "tela:" + chave.slice(0, 40), em });
+      if (!error) novas++;
+    }
+    await db.from("agente_fila").upsert({ username: s!.u, telefone, responder_apos: new Date().toISOString(), tentativas: 0 }, { onConflict: "username,telefone" });
+    return { ok: true, telefone, novas };
+  },
   async agente_painel(_b, s) {
     await agenteUser(s);
     const mes = new Date().toISOString().slice(0, 7);
@@ -411,7 +438,10 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     const avisoAprendizado = agoraBRT.getUTCDay() === 1 && Date.now() - ultimaLicao > 5 * 864e5;
     return {
       pendentes_sugestao: fila.count || 0,
-      rascunhos: lista.map((r) => ({ ...r, cliente: cm.get(r.telefone) || null })),
+      rascunhos: await Promise.all(lista.map(async (r) => {
+        const { data: u } = await db.from("agente_mensagens").select("em").eq("username", s!.u).eq("telefone", r.telefone).eq("de", "cliente").eq("origem", "cliente").order("em", { ascending: false }).limit(1).maybeSingle();
+        return { ...r, cliente: cm.get(r.telefone) || null, pode_api: !!u?.em && Date.now() - Date.parse(u.em) < 23.5 * 3600e3 };
+      })),
       cota: { usadas: Number(uso.data?.api_enviadas || 0), teto: Number(cfg.data?.teto_api_mes || 950) },
       aviso_aprendizado: avisoAprendizado,
       quentes: (await actions.agente_quentes({}, s) as any).quentes.slice(0, 30),
@@ -436,13 +466,13 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     if (!msgs.length) fail(400, "Mensagem vazia");
     const [cfgQ, ultQ, usoQ] = await Promise.all([
       db.from("agente_config").select("wa_phone_number_id,teto_api_mes").eq("username", s!.u).maybeSingle(),
-      db.from("agente_mensagens").select("em").eq("username", s!.u).eq("telefone", r.telefone).eq("de", "cliente").order("em", { ascending: false }).limit(1).maybeSingle(),
+      db.from("agente_mensagens").select("em").eq("username", s!.u).eq("telefone", r.telefone).eq("de", "cliente").eq("origem", "cliente").order("em", { ascending: false }).limit(1).maybeSingle(),
       db.from("agente_uso").select("*").eq("username", s!.u).eq("mes", agora.slice(0, 7)).maybeSingle(),
     ]);
     const cfg = cfgQ.data; const tok = Deno.env.get("WA_SYSTEM_TOKEN");
     if (!cfg?.wa_phone_number_id || !tok) fail(400, "Número do WhatsApp não configurado");
     // janela de 24h: fora dela a API só aceita template (pago) → use "Inserir no WhatsApp"
-    if (!ultQ.data?.em || Date.now() - Date.parse(ultQ.data.em) > 23.5 * 3600e3) fail(409, "Janela de 24h fechada: use 'Inserir no WhatsApp' e envie pelo app (grátis)");
+    if (!ultQ.data?.em || Date.now() - Date.parse(ultQ.data.em) > 23.5 * 3600e3) fail(409, "Essa conversa não está na API (ou a janela de 24h fechou): use 'Inserir no WhatsApp' e aperte Enter");
     const usadas = Number(usoQ.data?.api_enviadas || 0);
     if (usadas + msgs.length > Number(cfg.teto_api_mes || 950) - 30) fail(409, "Cota grátis do mês no limite: use 'Inserir no WhatsApp'");
     for (let i = 0; i < msgs.length; i++) {
