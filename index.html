@@ -1619,6 +1619,15 @@ async function syncAgente() {
         if(ag.scoreAuto && c.prioridade && l.score !== c.prioridade) { l.score = c.prioridade; mudou = true; }
         if(c.nome && /^\(\d/.test(l.nome)) { l.nome = c.nome; mudou = true; }
       }
+      // comprador importado: vira venda (valor em branco pra você completar); também completa cards criados antes
+      if(c.etapa === 'vendido' && l.agente && !l.agente.vendaImportada && !state.vendas.some(v => v.leadId === l.id)) {
+        if(c.compra_regiao && !l.compraRegiao) l.compraRegiao = c.compra_regiao;
+        if(c.compra_data) l.data = c.compra_data;
+        if(l.etapa !== 'vendido') { l.etapa = 'vendido'; l.agente.etapaAplicada = 'vendido'; }
+        l.agente.vendaReportada = true; l.agente.vendaImportada = true;
+        state.vendas.push({ id: state.nextId++, leadId: l.id, cliente: l.nome, imovel: c.empreendimento || l.imovel || '—', valor: 0, data: c.compra_data || hoje(), comissao: 0.06, comissaoCoord: 0, premio: 0, cancelada: false, importado: true });
+        mudou = true;
+      }
       nomePorTel[k] = l.nome;
       if(l.agente && l.agente.quente !== !!c.eh_quente) { l.agente.quente = !!c.eh_quente; mudou = true; }
       // ── Agenda: follow-up marcado pelo agente ──

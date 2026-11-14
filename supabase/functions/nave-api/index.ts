@@ -212,7 +212,7 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
   async agente_sync(_b, s) {
     await agenteUser(s);
     const [cli, prec, rasc] = await Promise.all([
-      db.from("agente_clientes").select("telefone,nome,origem,etapa,perfil,empreendimento,renda,entrada,resumo,proximo_followup,passado_humano,atualizado_em,quente,quente_manual").eq("username", s!.u).eq("crm_ignorar", false),
+      db.from("agente_clientes").select("telefone,nome,origem,etapa,perfil,empreendimento,renda,entrada,resumo,proximo_followup,passado_humano,atualizado_em,quente,quente_manual,compra_data,compra_regiao").eq("username", s!.u).eq("crm_ignorar", false),
       db.from("agente_precos").select("empreendimento,bairro,tipologia,valor,entrega,bloqueado").eq("username", s!.u),
       db.from("agente_rascunhos").select("id,telefone,acao,motivo,prioridade,status,criado_em").eq("username", s!.u).order("criado_em", { ascending: false }).limit(300),
     ]);
