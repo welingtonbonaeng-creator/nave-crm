@@ -1636,18 +1636,7 @@ async function syncAgente() {
       state.eventos.push({ id: state.nextId++, titulo: `Retornar: ${nome}`, data: (t.em || '').slice(0,10) || hoje(), hora:'', tipo:'retorno', cliente: nome, notas: '🤖 Precisa de você: ' + (t.motivo || ''), agenteKey: chave });
       mudou = true;
     }
-    // ── Imóveis: a partir da tabela de preços do agente (não mexe nos que você cadastrou) ──
-    const grupos = {};
-    for(const p of r.precos) (grupos[p.empreendimento] ||= []).push(p);
-    for(const [nome, linhas] of Object.entries(grupos)) {
-      const tipologias = linhas.filter(x => !x.bloqueado && x.valor).map(x => ({ nome: x.tipologia, area:'', valor: Number(x.valor), valorSBPE:0, valorMCMV3:0, valorMCMV4:0 }));
-      const ent = (linhas.find(x => x.entrega)?.entrega || '').match(/^(\d{2})\/(\d{4})$/);
-      const dados = { end: linhas[0].bairro || '', tipo:'Apartamento', valor: tipologias.length ? Math.min(...tipologias.map(t => t.valor)) : 0, area:0,
-                      qtos: tipologias.length, statusObra:'em_obras', dataEntrega: ent ? `${ent[2]}-${ent[1]}-01` : '', tipologias };
-      const ex = state.imoveis.find(i => (i.nome||'').trim().toLowerCase() === nome.trim().toLowerCase());
-      if(!ex) { state.imoveis.push({ id: state.nextId++, nome, ...dados, valorSBPE:0, valorMCMV3:0, valorMCMV4:0, arquivos:[], agente:true }); mudou = true; }
-      else if(ex.agente && JSON.stringify(ex.tipologias) !== JSON.stringify(tipologias)) { Object.assign(ex, dados); mudou = true; }
-    }
+    // Imóveis: as informações ficam no site (melhoresimoveisrj.vercel.app); o agente não cria imóveis aqui.
     // ── Vendas / perdas / visitas → aprendizado do agente ──
     for(const l of state.leads) {
       if(!l.agente) continue;
@@ -1994,7 +1983,8 @@ function showPage(p) {
   document.querySelectorAll('.nav-item').forEach(el => { if(el.getAttribute('onclick')?.includes(p)) el.classList.add('active') });
   document.getElementById('pageTitle').textContent = PAGE_META[p].title;
   document.getElementById('pageSub').textContent   = PAGE_META[p].sub;
-  document.getElementById('topbarActions').innerHTML = PAGE_META[p].action;
+  document.getElementById('topbarActions').innerHTML = PAGE_META[p].action
+    + (p === 'imoveis' && currentUser?.agente ? ' <a class="btn btn-ghost" href="https://melhoresimoveisrj.vercel.app/#empreendimentos" target="_blank" rel="noopener" style="margin-left:6px;text-decoration:none">🌐 Ver todos no site</a>' : '');
   render();
   if(p === 'agente') loadAgente();
 }
