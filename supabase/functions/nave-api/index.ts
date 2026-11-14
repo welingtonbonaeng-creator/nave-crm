@@ -208,6 +208,37 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     await db.from("agente_config").upsert({ username: s!.u, chave_copiloto_hash: await sha256hex(chave), atualizado_em: new Date().toISOString() }, { onConflict: "username" });
     return { chave };
   },
+  // ── CRM: sincronização com as abas (Pipeline, Agenda, Imóveis, Vendas) ──
+  async agente_sync(_b, s) {
+    await agenteUser(s);
+    const [cli, prec, rasc] = await Promise.all([
+      db.from("agente_clientes").select("telefone,nome,origem,etapa,perfil,empreendimento,renda,entrada,resumo,proximo_followup,passado_humano,atualizado_em").eq("username", s!.u).eq("crm_ignorar", false),
+      db.from("agente_precos").select("empreendimento,bairro,tipologia,valor,entrega,bloqueado").eq("username", s!.u),
+      db.from("agente_rascunhos").select("id,telefone,acao,motivo,prioridade,status,criado_em").eq("username", s!.u).order("criado_em", { ascending: false }).limit(300),
+    ]);
+    const prio = new Map<string, number>();
+    const tarefas: any[] = [];
+    for (const r of rasc.data || []) {
+      if (!prio.has(r.telefone) && r.prioridade) prio.set(r.telefone, r.prioridade);
+      if (r.acao === "passar_humano" && r.status === "pendente") tarefas.push({ id: r.id, telefone: r.telefone, motivo: r.motivo, em: r.criado_em });
+    }
+    return { clientes: (cli.data || []).map((c: any) => ({ ...c, prioridade: prio.get(c.telefone) || null })), precos: prec.data || [], tarefas };
+  },
+  // O CRM avisa o agente do que aconteceu fora do WhatsApp (venda, perda, visita) → vira aprendizado
+  async agente_crm_evento(b, s) {
+    await agenteUser(s);
+    const telefone = normFone(b.telefone);
+    const tipo = ["venda", "perdido", "visita", "removido"].includes(b.tipo) ? b.tipo : null;
+    if (!telefone || !tipo) fail(400, "telefone e tipo obrigatórios");
+    if (tipo === "removido") { // você apagou o card no CRM: o agente não recria
+      await db.from("agente_clientes").update({ crm_ignorar: true }).eq("username", s!.u).eq("telefone", telefone);
+      return { ok: true };
+    }
+    await db.from("agente_eventos").insert({ username: s!.u, telefone, tipo: "crm_" + tipo, dados: b.dados || null });
+    const etapa = tipo === "venda" ? "vendido" : tipo === "perdido" ? "perdido" : "visita";
+    await db.from("agente_clientes").update({ etapa, atualizado_em: new Date().toISOString() }).eq("username", s!.u).eq("telefone", telefone);
+    return { ok: true };
+  },
   // ── CRM: placar + movimentações automáticas ──
   async agente_movimentos(_b, s) {
     await agenteUser(s);
