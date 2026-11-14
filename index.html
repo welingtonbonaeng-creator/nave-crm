@@ -2437,7 +2437,12 @@ function renderPipeline() {
 }
 
 // ── Vendidos: onde comprou + contato direto ──
-const REGIOES_COMPRA = ['Porto Maravilha', 'Niterói', 'Praça Onze', 'Outra'];
+const REGIOES_COMPRA = ['Porto Maravilha', 'Niterói', 'Praça Onze'];
+// lista = padrões + todas as regiões que você já criou nos seus vendidos (ex.: Recreio)
+function regioesCompra() {
+  const extras = [...new Set(state.leads.map(l => (l.compraRegiao || '').trim()).filter(r => r && r !== 'Outra' && !REGIOES_COMPRA.includes(r)))].sort((a,b) => a.localeCompare(b,'pt-BR'));
+  return REGIOES_COMPRA.concat(extras);
+}
 function inferirRegiaoCompra(l) {
   const venda = state.vendas.find(v => v.leadId === l.id && !v.cancelada);
   const t = [l.imovel, l.regiao, venda?.imovel].filter(Boolean).join(' ').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
@@ -2450,7 +2455,7 @@ function inferirRegiaoCompra(l) {
 function htmlCompraCard(l) {
   const reg = l.compraRegiao || inferirRegiaoCompra(l);
   const auto = !l.compraRegiao && reg;
-  const opts = ['<option value="">Onde comprou?</option>'].concat(REGIOES_COMPRA.map(r => '<option'+(r===reg?' selected':'')+'>'+r+'</option>')).join('');
+  const opts = ['<option value="">Onde comprou?</option>'].concat(regioesCompra().map(r => '<option value="'+escA(r)+'"'+(r===reg?' selected':'')+'>'+escA(r)+'</option>'), ['<option value="__nova__">Outra… (criar nova)</option>']).join('');
   const tel = l.tel ? '<a href="'+waLink(l.tel)+'" target="nave_whatsapp" rel="noopener" onclick="event.stopPropagation()" style="display:inline-block;margin-top:4px;font-size:11px;font-weight:700;color:#25D366;text-decoration:none;white-space:nowrap" title="Abrir a conversa no WhatsApp">💬 '+escA(l.tel)+'</a>' : '';
   return '<div style="margin-top:6px;display:flex;flex-direction:column;gap:2px" onclick="event.stopPropagation()" ondragstart="event.stopPropagation()">'+
     '<label style="font-size:10px;color:var(--text3);white-space:nowrap">📍 Comprou em'+(auto?' <span title="Preenchido pelo empreendimento" style="opacity:.7">· auto</span>':'')+'</label>'+
@@ -2459,6 +2464,12 @@ function htmlCompraCard(l) {
 }
 function setCompraRegiao(id, valor) {
   const l = state.leads.find(x => x.id === id); if(!l) return;
+  if(valor === '__nova__') {
+    const nova = (prompt('Nome da nova região (ex.: Recreio):') || '').trim().replace(/\s+/g, ' ');
+    if(!nova) { render(); return; } // cancelou: volta como estava
+    const existente = regioesCompra().find(r => r.toLowerCase() === nova.toLowerCase());
+    valor = existente || nova.charAt(0).toUpperCase() + nova.slice(1);
+  }
   l.compraRegiao = valor; scheduleSave(); render();
 }
 
