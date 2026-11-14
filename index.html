@@ -1583,7 +1583,8 @@ async function resetSenha(username) {
 const AG_ETAPA = { novo:'lead', diagnostico:'lead', regiao:'lead', valor:'lead', financiamento:'negociacao', simulacao:'negociacao', visita:'negociacao', perdido:'perdido', vendido:'vendido' };
 const AG_ORDEM = { lead:0, futuro:0, negociacao:1, proposta:2, visita:3, vendido:4, perdido:5 };
 const telChave = t => String(t||'').replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').slice(-11);
-const fmtTel = t => { const d = telChave(t); return d.length === 11 ? `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}` : (t||''); };
+const telIntl = t => /^\s*\+/.test(String(t||'')) && !/^\s*\+\s*55/.test(String(t||'')); // estrangeiro (ex.: +44 Reino Unido)
+const fmtTel = t => { if(telIntl(t)) return '+' + String(t).replace(/\D/g,''); const d = telChave(t); return d.length === 11 ? `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}` : (t||''); };
 let _syncRodando = false;
 async function syncAgente() {
   if(!currentUser?.agente || _syncRodando) return;
@@ -1600,6 +1601,11 @@ async function syncAgente() {
       const etapaAg = AG_ETAPA[c.etapa];
       const resumo = c.resumo ? '🤖 ' + c.resumo : '';
       let l = porTel.get(k);
+      if(!l && c.tel_antigo) {
+        const kv = telChave(c.tel_antigo);
+        l = state.leads.find(x => x.agente && (x.agente.tel === c.tel_antigo || telChave(x.agente.tel) === kv));
+        if(l) { porTel.delete(telChave(l.tel)); l.tel = fmtTel(c.telefone); l.agente.tel = c.telefone; porTel.set(k, l); mudou = true; }
+      }
       if(!l) {
         l = { id: state.nextId++, nome: c.nome || fmtTel(c.telefone), tel: fmtTel(c.telefone), email:'', renda: c.renda || '', regiao:'', imovel: c.empreendimento || '',
               valor:0, ato:0, fgts:false, fgtsValor:0, fgtsAnos:0, pv:'', ac:'', origem: c.origem || 'WhatsApp (agente)', etapa: etapaAg || 'lead',
@@ -1618,6 +1624,19 @@ async function syncAgente() {
         if(resumo && (!l.obs || l.obs.startsWith('🤖 ')) && l.obs !== resumo) { l.obs = resumo; mudou = true; }
         if(ag.scoreAuto && c.prioridade && l.score !== c.prioridade) { l.score = c.prioridade; mudou = true; }
         if(c.nome && /^\(\d/.test(l.nome)) { l.nome = c.nome; mudou = true; }
+      }
+      // várias compras do mesmo cliente: uma venda por imóvel
+      if(Array.isArray(c.compras) && c.compras.length && l.agente && l.agente.comprasVersao !== JSON.stringify(c.compras)) {
+        state.vendas = state.vendas.filter(v => !(v.leadId === l.id && v.importado && !v.valor));
+        c.compras.forEach((cp, i) => {
+          if(state.vendas.some(v => v.leadId === l.id && v.compraIdx === i)) return;
+          state.vendas.push({ id: state.nextId++, leadId: l.id, cliente: l.nome, imovel: cp.imovel || '—', regiao: cp.regiao || '', valor: Number(cp.valor) || 0,
+                              data: cp.data || c.compra_data || hoje(), comissao: 0.06, comissaoCoord: 0, premio: 0, cancelada: false, importado: true, compraIdx: i });
+        });
+        if(l.etapa !== 'vendido') { l.etapa = 'vendido'; l.agente.etapaAplicada = 'vendido'; }
+        l.imovel = [...new Set(c.compras.map(cp => cp.imovel.split(' · ')[0]))].join(' + ');
+        l.agente.comprasVersao = JSON.stringify(c.compras); l.agente.vendaImportada = true; l.agente.vendaReportada = true;
+        mudou = true;
       }
       // comprador importado: vira venda (valor em branco pra você completar); também completa cards criados antes
       if(c.etapa === 'vendido' && l.agente && !l.agente.vendaImportada && !state.vendas.some(v => v.leadId === l.id)) {
@@ -2453,6 +2472,14 @@ function inferirRegiaoCompra(l) {
   return '';
 }
 function htmlCompraCard(l) {
+  const compras = state.vendas.filter(v => v.leadId === l.id && !v.cancelada);
+  if(compras.length > 1) {
+    const tel = l.tel ? '<a href="'+waLink(l.tel)+'" target="nave_whatsapp" rel="noopener" onclick="event.stopPropagation()" style="display:inline-block;margin-top:4px;font-size:11px;font-weight:700;color:#25D366;text-decoration:none;white-space:nowrap" title="Abrir a conversa no WhatsApp">💬 '+escA(l.tel)+'</a>' : '';
+    return '<div style="margin-top:6px;font-size:11px" onclick="event.stopPropagation()">'+
+      '<div style="font-weight:700;color:var(--green)">🛒 '+compras.length+' compras</div>'+
+      compras.map(v => '<div style="color:var(--text2)">• '+escA(v.imovel)+(v.regiao ? ' <span style="color:var(--text3)">('+escA(v.regiao)+')</span>' : '')+'</div>').join('')+
+      tel+'</div>';
+  }
   const reg = l.compraRegiao || inferirRegiaoCompra(l);
   const auto = !l.compraRegiao && reg;
   const opts = ['<option value="">Onde comprou?</option>'].concat(regioesCompra().map(r => '<option value="'+escA(r)+'"'+(r===reg?' selected':'')+'>'+escA(r)+'</option>'), ['<option value="__nova__">Outra… (criar nova)</option>']).join('');
@@ -3051,7 +3078,7 @@ setTimeout(checkFuturoLembretes, 6000);
 function waLink(tel) {
   if(!tel) return null;
   const d0 = tel.replace(/\D/g,''); if(!d0) return null;
-  const d = d0.startsWith('55') ? d0 : '55'+d0;
+  const d = (d0.startsWith('55') || /^\s*\+/.test(tel)) ? d0 : '55'+d0; // com "+" já tem o código do país
   const celular = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
   return (celular || !currentUser?.agente) ? 'https://wa.me/' + d : 'https://web.whatsapp.com/send?phone=' + d; // WhatsApp Web direto só no CRM do Well
 }
