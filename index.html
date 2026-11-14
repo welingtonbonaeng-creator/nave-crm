@@ -2404,6 +2404,7 @@ function renderPipeline() {
               ' onclick="verLead('+l.id+')" id="lcard-'+l.id+'">'+
               '<div class="lead-name">'+l.nome+'</div>'+
               '<div class="lead-imovel">🏠 '+(l.imovel||'—')+'</div>'+
+              (etapa==='vendido' && currentUser?.agente ? htmlCompraCard(l) : '')+
               (ult ? '<div style="font-size:10px;color:var(--text3);margin-top:3px;padding:3px 6px;background:var(--bg4);border-radius:4px">↪ <span style="color:var(--text2)">'+ETAPA_LABEL[ult.para]+'</span> · '+ult.dataHora+(ult.obs?'<br><span style="color:var(--yellow)">'+ult.obs+'</span>':'')+'</div>' : '')+
               (l.motivoPerda&&l.etapa==='perdido'?'<div style="font-size:10px;color:var(--red);margin-top:2px">😔 '+l.motivoPerda+'</div>':'')+
               (l.motivoFuturo&&l.etapa==='futuro'?'<div style="font-size:10px;color:#A78BFA;margin-top:2px">🔮 '+l.motivoFuturo+'</div>':'')+
@@ -2424,6 +2425,32 @@ function renderPipeline() {
         </div>
       </div>`;
   }).join('');
+}
+
+// ── Vendidos: onde comprou + contato direto ──
+const REGIOES_COMPRA = ['Porto Maravilha', 'Niterói', 'Praça Onze', 'Outra'];
+function inferirRegiaoCompra(l) {
+  const venda = state.vendas.find(v => v.leadId === l.id && !v.cancelada);
+  const t = [l.imovel, l.regiao, venda?.imovel].filter(Boolean).join(' ').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  if(!t) return '';
+  if(/niter|orla central/.test(t)) return 'Niterói';
+  if(/praca onze|saudosa|sambodromo/.test(t)) return 'Praça Onze';
+  if(/porto|cartola|luzes do rio|lamparina|ivone|pixinguinha|carinhoso|farol|\bere\b|orla maua|rio wonder|rio energy|epicentro|santo cristo|sao cristovao|gamboa|heitor|ciata|mirante/.test(t)) return 'Porto Maravilha';
+  return '';
+}
+function htmlCompraCard(l) {
+  const reg = l.compraRegiao || inferirRegiaoCompra(l);
+  const auto = !l.compraRegiao && reg;
+  const opts = ['<option value="">Onde comprou?</option>'].concat(REGIOES_COMPRA.map(r => '<option'+(r===reg?' selected':'')+'>'+r+'</option>')).join('');
+  const tel = l.tel ? '<a href="'+waLink(l.tel)+'" target="nave_whatsapp" rel="noopener" onclick="event.stopPropagation()" style="display:inline-block;margin-top:4px;font-size:11px;font-weight:700;color:#25D366;text-decoration:none;white-space:nowrap" title="Abrir a conversa no WhatsApp">💬 '+escA(l.tel)+'</a>' : '';
+  return '<div style="margin-top:6px;display:flex;flex-direction:column;gap:2px" onclick="event.stopPropagation()" ondragstart="event.stopPropagation()">'+
+    '<label style="font-size:10px;color:var(--text3);white-space:nowrap">📍 Comprou em'+(auto?' <span title="Preenchido pelo empreendimento" style="opacity:.7">· auto</span>':'')+'</label>'+
+    '<select class="form-select" style="font-size:11px;padding:4px 6px;width:100%;min-width:0" aria-label="Onde comprou" onchange="setCompraRegiao('+l.id+', this.value)">'+opts+'</select>'+
+    tel+'</div>';
+}
+function setCompraRegiao(id, valor) {
+  const l = state.leads.find(x => x.id === id); if(!l) return;
+  l.compraRegiao = valor; scheduleSave(); render();
 }
 
 // ── Drag entre colunas (mover etapa) ──
@@ -3003,8 +3030,10 @@ setTimeout(checkFuturoLembretes, 6000);
 // ── WhatsApp ──
 function waLink(tel) {
   if(!tel) return null;
-  const d = tel.replace(/\D/g,'');
-  return 'https://wa.me/' + (d.startsWith('55') ? d : '55'+d);
+  const d0 = tel.replace(/\D/g,''); if(!d0) return null;
+  const d = d0.startsWith('55') ? d0 : '55'+d0;
+  const celular = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+  return (celular || !currentUser?.agente) ? 'https://wa.me/' + d : 'https://web.whatsapp.com/send?phone=' + d; // WhatsApp Web direto só no CRM do Well
 }
 function abrirWhatsApp(tel, event) {
   if(event) event.stopPropagation();
