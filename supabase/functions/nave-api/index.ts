@@ -212,7 +212,7 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
   async agente_sync(_b, s) {
     await agenteUser(s);
     const [cli, prec, rasc] = await Promise.all([
-      db.from("agente_clientes").select("telefone,nome,origem,etapa,perfil,empreendimento,renda,entrada,resumo,proximo_followup,passado_humano,atualizado_em").eq("username", s!.u).eq("crm_ignorar", false),
+      db.from("agente_clientes").select("telefone,nome,origem,etapa,perfil,empreendimento,renda,entrada,resumo,proximo_followup,passado_humano,atualizado_em,quente,quente_manual").eq("username", s!.u).eq("crm_ignorar", false),
       db.from("agente_precos").select("empreendimento,bairro,tipologia,valor,entrega,bloqueado").eq("username", s!.u),
       db.from("agente_rascunhos").select("id,telefone,acao,motivo,prioridade,status,criado_em").eq("username", s!.u).order("criado_em", { ascending: false }).limit(300),
     ]);
@@ -222,7 +222,7 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
       if (!prio.has(r.telefone) && r.prioridade) prio.set(r.telefone, r.prioridade);
       if (r.acao === "passar_humano" && r.status === "pendente") tarefas.push({ id: r.id, telefone: r.telefone, motivo: r.motivo, em: r.criado_em });
     }
-    return { clientes: (cli.data || []).map((c: any) => ({ ...c, prioridade: prio.get(c.telefone) || null })), precos: prec.data || [], tarefas };
+    return { clientes: (cli.data || []).map((c: any) => ({ ...c, prioridade: prio.get(c.telefone) || null, eh_quente: !['vendido', 'perdido'].includes(c.etapa) && (c.quente_manual === true || (c.quente_manual !== false && !!c.quente)) })), precos: prec.data || [], tarefas };
   },
   // O CRM avisa o agente do que aconteceu fora do WhatsApp (venda, perda, visita) → vira aprendizado
   async agente_crm_evento(b, s) {
@@ -237,6 +237,23 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
     await db.from("agente_eventos").insert({ username: s!.u, telefone, tipo: "crm_" + tipo, dados: b.dados || null });
     const etapa = tipo === "venda" ? "vendido" : tipo === "perdido" ? "perdido" : "visita";
     await db.from("agente_clientes").update({ etapa, atualizado_em: new Date().toISOString() }).eq("username", s!.u).eq("telefone", telefone);
+    return { ok: true };
+  },
+  // ── 🔥 Quentes: marcados pelo agente (quente ou prioridade ≥ 7) ou por você; sua marcação manda ──
+  async agente_quentes(_b, s) {
+    await agenteUser(s);
+    const { data } = await db.from("agente_clientes")
+      .select("telefone,nome,etapa,perfil,empreendimento,resumo,prioridade,quente,quente_manual,ultimo_msg_cliente,ultimo_msg_nosso")
+      .eq("username", s!.u).eq("crm_ignorar", false);
+    const lista = (data || []).filter((c: any) => !["vendido", "perdido"].includes(c.etapa) && (c.quente_manual === true || (c.quente_manual !== false && c.quente)))
+      .map((c: any) => ({ ...c, aguardando: !!c.ultimo_msg_cliente && (!c.ultimo_msg_nosso || c.ultimo_msg_cliente > c.ultimo_msg_nosso) }))
+      .sort((a: any, b: any) => (b.prioridade || 0) - (a.prioridade || 0) || String(b.ultimo_msg_cliente || "").localeCompare(String(a.ultimo_msg_cliente || "")));
+    return { quentes: lista };
+  },
+  async agente_quente_marcar(b, s) {
+    await agenteUser(s);
+    const v = b.quente === true ? true : b.quente === false ? false : null; // null = volta a decisão pro agente
+    await db.from("agente_clientes").update({ quente_manual: v }).eq("username", s!.u).eq("telefone", normFone(b.telefone));
     return { ok: true };
   },
   // ── CRM: conversas esquecidas (última mensagem é do cliente e ninguém respondeu) ──
@@ -379,6 +396,7 @@ const actions: Record<string, (b: any, s: Ctx) => Promise<unknown>> = {
       rascunhos: lista.map((r) => ({ ...r, cliente: cm.get(r.telefone) || null })),
       cota: { usadas: Number(uso.data?.api_enviadas || 0), teto: Number(cfg.data?.teto_api_mes || 950) },
       aviso_aprendizado: avisoAprendizado,
+      quentes: (await actions.agente_quentes({}, s) as any).quentes.slice(0, 30),
     };
   },
   async agente_rascunho_acao(b, s) {
@@ -588,6 +606,11 @@ const agentActions: Record<string, (b: any) => Promise<unknown>> = {
       await db.from("agente_rascunhos").insert({ username, telefone, mensagens, acao, motivo: b.motivo || b.motivo_alerta || null, prioridade: Number(b.prioridade) || null, status: "pendente", modelo: "assinatura" });
     }
     await agentActions.agente_cliente({ username, telefone, campos: { ...(b.perfil || {}), objecoes: b.objecoes || [], passado_humano: acao === "passar_humano" }, aprendizado: b.aprendizado || undefined });
+    // 🔥 quente: o agente marca; uma vez quente, só sai se o Well desmarcar (quente_manual=false)
+    const pr = Number(b.prioridade) || null;
+    const upd: any = { prioridade: pr };
+    if (b.quente || (pr && pr >= 7)) upd.quente = true;
+    await db.from("agente_clientes").update(upd).eq("username", username).eq("telefone", telefone);
     await db.from("agente_fila").delete().eq("username", username).eq("telefone", telefone);
     let alerta = false;
     if (b.quente || acao === "passar_humano") {
