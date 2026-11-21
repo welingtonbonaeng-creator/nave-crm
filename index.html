@@ -1631,7 +1631,7 @@ async function syncAgente() {
         c.compras.forEach((cp, i) => {
           if(state.vendas.some(v => v.leadId === l.id && v.compraIdx === i)) return;
           state.vendas.push({ id: state.nextId++, leadId: l.id, cliente: l.nome, imovel: cp.imovel || '—', regiao: cp.regiao || '', valor: Number(cp.valor) || 0,
-                              data: cp.data || c.compra_data || hoje(), comissao: 0.06, comissaoCoord: 0, premio: 0, cancelada: false, importado: true, compraIdx: i });
+                              data: cp.data || c.compra_data || hoje(), comissao: Number(cp.comissao) || 0.06, comissaoCoord: 0, premio: 0, cancelada: false, importado: true, compraIdx: i });
         });
         if(l.etapa !== 'vendido') { l.etapa = 'vendido'; l.agente.etapaAplicada = 'vendido'; }
         l.imovel = [...new Set(c.compras.map(cp => cp.imovel.split(' · ')[0]))].join(' + ');
