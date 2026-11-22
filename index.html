@@ -1587,6 +1587,8 @@ const telIntl = t => /^\s*\+/.test(String(t||'')) && !/^\s*\+\s*55/.test(String(
 const fmtTel = t => { if(telIntl(t)) return '+' + String(t).replace(/\D/g,''); const d = telChave(t); return d.length === 11 ? `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}` : (t||''); };
 let _syncRodando = false;
 async function syncAgente() {
+  // comissão do Well: 1,9% nas vendas antigas importadas (padrão errado era 6%); vendas novas 2% vêm na compra
+  if(currentUser && currentUser.agente && !state.comissaoMigrada){ (state.vendas||[]).forEach(v => { if(v.importado && v.comissao === 0.06) v.comissao = 0.019; }); state.comissaoMigrada = true; }
   if(!currentUser?.agente || _syncRodando) return;
   _syncRodando = true;
   try {
@@ -1631,7 +1633,7 @@ async function syncAgente() {
         c.compras.forEach((cp, i) => {
           if(state.vendas.some(v => v.leadId === l.id && v.compraIdx === i)) return;
           state.vendas.push({ id: state.nextId++, leadId: l.id, cliente: l.nome, imovel: cp.imovel || '—', regiao: cp.regiao || '', valor: Number(cp.valor) || 0,
-                              data: cp.data || c.compra_data || hoje(), comissao: Number(cp.comissao) || 0.06, comissaoCoord: 0, premio: 0, cancelada: false, importado: true, compraIdx: i });
+                              data: cp.data || c.compra_data || hoje(), comissao: Number(cp.comissao) || 0.019, comissaoCoord: 0, premio: 0, cancelada: false, importado: true, compraIdx: i });
         });
         if(l.etapa !== 'vendido') { l.etapa = 'vendido'; l.agente.etapaAplicada = 'vendido'; }
         l.imovel = [...new Set(c.compras.map(cp => cp.imovel.split(' · ')[0]))].join(' + ');
@@ -1644,7 +1646,7 @@ async function syncAgente() {
         if(c.compra_data) l.data = c.compra_data;
         if(l.etapa !== 'vendido') { l.etapa = 'vendido'; l.agente.etapaAplicada = 'vendido'; }
         l.agente.vendaReportada = true; l.agente.vendaImportada = true;
-        state.vendas.push({ id: state.nextId++, leadId: l.id, cliente: l.nome, imovel: c.empreendimento || l.imovel || '—', valor: 0, data: c.compra_data || hoje(), comissao: 0.06, comissaoCoord: 0, premio: 0, cancelada: false, importado: true });
+        state.vendas.push({ id: state.nextId++, leadId: l.id, cliente: l.nome, imovel: c.empreendimento || l.imovel || '—', valor: 0, data: c.compra_data || hoje(), comissao: 0.019, comissaoCoord: 0, premio: 0, cancelada: false, importado: true });
         mudou = true;
       }
       nomePorTel[k] = l.nome;
