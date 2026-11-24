@@ -1666,6 +1666,28 @@ async function syncAgente() {
         }
       }
     }
+    // ── Manutenções (aplica cada uma uma única vez) ──
+    state.manutAplicadas = state.manutAplicadas || [];
+    for(const m of (r.manutencoes || [])) {
+      if(state.manutAplicadas.includes(m.id)) continue;
+      for(const op of (m.ops || [])) {
+        if(op.op === 'remover_lead') { state.leads = state.leads.filter(l => l.id !== op.leadId); state.vendas = state.vendas.filter(v => v.leadId !== op.leadId); }
+        if(op.op === 'venda_set') {
+          // mesma PV = mesma venda (parcelas somam); sem PV na venda ainda: a 1ª venda do lead sem PV (ou a do compraIdx)
+          const doLead = state.vendas.filter(x => x.leadId === op.leadId);
+          let v = doLead.find(x => op.set.pv && x.pv === op.set.pv)
+               || (op.nova ? null : doLead.find(x => !x.pv && (op.compraIdx === undefined || x.compraIdx === op.compraIdx)));
+          if(!v && op.nova) { const l = state.leads.find(x => x.id === op.leadId); v = { id: state.nextId++, leadId: op.leadId, cliente: l ? l.nome : (op.cliente || ''), valor: 0, comissao: 0.019, comissaoCoord: 0, premio: 0, cancelada: false, importado: true }; state.vendas.push(v); }
+          if(v) Object.assign(v, op.set);
+        }
+        if(op.op === 'lead_novo') {
+          const l = { id: state.nextId++, email:'', renda:'', valor:0, ato:0, fgts:false, fgtsValor:0, fgtsAnos:0, pv:'', ac:'', score:0, tel:'', regiao:'', data: hoje(), origem:'', obs:'', ...op.lead, etapa:'vendido' };
+          state.leads.push(l);
+          (op.vendas || []).forEach(vs => state.vendas.push({ id: state.nextId++, leadId: l.id, cliente: l.nome, valor: 0, comissao: 0.019, comissaoCoord: 0, premio: 0, cancelada: false, importado: true, ...vs }));
+        }
+      }
+      state.manutAplicadas.push(m.id); mudou = true;
+    }
     // ── Prioridade da triagem (JOSÉ): só na tela, não salva no quadro ──
     const novaPrio = new Map((r.prioridades || []).map(p => [telChave(p.telefone), p]));
     const assin = JSON.stringify([...novaPrio.entries()].map(([k, p]) => [k, p.pos]));
@@ -2760,6 +2782,10 @@ function navMesVendas(dir) {
   if(filtroVendasMes < 0)  { filtroVendasMes = 11; filtroVendasAno--; }
   renderVendas();
 }
+// comissão real (parcelas pagas pela Cury) quando existir; senão o cálculo % × valor
+const comParcelas = v => Array.isArray(v.comissaoParcelas) && v.comissaoParcelas.length;
+const comVenda = v => comParcelas(v) ? v.comissaoParcelas.reduce((s,p)=>s+(Number(p.valor)||0),0) : v.valor*v.comissao;
+const comPorStatus = (v, st) => comParcelas(v) ? v.comissaoParcelas.filter(p=>p.status===st).reduce((s,p)=>s+(Number(p.valor)||0),0) : 0;
 function renderVendas() {
   const monthNames = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const ano = new Date().getFullYear();
@@ -2778,7 +2804,9 @@ function renderVendas() {
   if(el) el.textContent = periodoLabel;
   const vendasAtivas = vendasFiltradas.filter(v=>!v.cancelada);
   const totalV     = vendasAtivas.reduce((s,v)=>s+v.valor,0);
-  const totalC     = vendasAtivas.reduce((s,v)=>s+v.valor*v.comissao,0);
+  const totalC     = vendasAtivas.reduce((s,v)=>s+comVenda(v),0);
+  const totalPago  = vendasAtivas.reduce((s,v)=>s+comPorStatus(v,'paga'),0);
+  const totalBloq  = vendasAtivas.reduce((s,v)=>s+comPorStatus(v,'bloqueada'),0);
   const totalCoord = vendasAtivas.reduce((s,v)=>s+(v.valor*(v.comissaoCoord||0)),0);
   const totalPremio= vendasAtivas.reduce((s,v)=>s+(v.premio||0),0);
   const totalLiq   = totalC + totalCoord + totalPremio;
@@ -2788,6 +2816,7 @@ function renderVendas() {
     <div class="stat-card"><div class="stat-label">Comissão vendedor</div><div class="stat-val accent">${fi(totalC)}</div><div class="stat-delta">${periodoLabel}</div></div>
     <div class="stat-card"><div class="stat-label">Coordenação + Prêmio</div><div class="stat-val yellow">${fi(totalCoord+totalPremio)}</div><div class="stat-delta">extras no período</div></div>
     <div class="stat-card"><div class="stat-label">Total a receber</div><div class="stat-val blue">${fi(totalLiq)}</div><div class="stat-delta">comissão + coord. + prêmio</div></div>
+    <div class="stat-card"><div class="stat-label">Comissão já recebida</div><div class="stat-val green">${fi(totalPago)}</div><div class="stat-delta">⏳ bloqueado/aguardando: ${fi(totalBloq)}</div></div>
   `;
   document.getElementById('tbodyVendas').innerHTML = vendasFiltradas.length
     ? vendasFiltradas.map(v=>`
@@ -2798,7 +2827,7 @@ function renderVendas() {
         </td>
         <td>${v.imovel}</td>
         <td class="money" style="${v.cancelada?'text-decoration:line-through;color:var(--red)':''}">${fi(v.valor)}</td>
-        <td class="money" style="${v.cancelada?'text-decoration:line-through;color:var(--red)':''}">${fi(v.valor*v.comissao)}</td>
+        <td class="money" style="${v.cancelada?'text-decoration:line-through;color:var(--red)':''}">${fi(comVenda(v))}${comParcelas(v) ? `<div style="font-size:10px;font-weight:500;color:var(--text3);margin-top:2px">✔ ${fi(comPorStatus(v,'paga'))} pago${comPorStatus(v,'bloqueada') ? ` · ⏳ ${fi(comPorStatus(v,'bloqueada'))} bloq.` : ''}${v.pv ? ` · ${escA(v.pv)}` : ''}</div>` + v.comissaoParcelas.filter(p=>p.obs).map(p=>`<div style="font-size:10px;color:var(--yellow)">${escA(p.obs)}</div>`).join('') : ''}</td>
         <td style="font-family:'JetBrains Mono',monospace;font-weight:600;color:${(v.comissaoCoord||0)>0?'var(--yellow)':'var(--text3)'}">
           ${(v.comissaoCoord||0)>0 ? fi(v.valor*v.comissaoCoord) : '—'}
         </td>
