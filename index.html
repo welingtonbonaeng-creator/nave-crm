@@ -1580,7 +1580,9 @@ async function resetSenha(username) {
 // Roda só para quem tem o agente ligado (hoje: só o Well) e só no quadro DELE.
 // Roda aqui no navegador e salva junto com o resto: o salvamento automático nunca apaga o que o agente colocou.
 // ══════════════════════════════════════════════
-const AG_ETAPA = { novo:'lead', diagnostico:'lead', regiao:'lead', valor:'lead', financiamento:'negociacao', simulacao:'negociacao', visita:'negociacao', perdido:'perdido', vendido:'vendido' };
+const AG_ETAPA = { novo:'lead', diagnostico:'lead', regiao:'lead', valor:'lead', financiamento:'negociacao', simulacao:'negociacao', visita:'visita', perdido:'perdido', vendido:'vendido' };
+// etapa fina do agente, mostrada como etiqueta no card (o quadro continua com as colunas do Well)
+const AG_ETAPA_LABEL = { novo:'Novo', diagnostico:'Diagnóstico', regiao:'Região', valor:'Valor', financiamento:'Financiamento', simulacao:'Simulação', visita:'Visita' };
 const AG_ORDEM = { lead:0, futuro:0, negociacao:1, proposta:2, visita:3, vendido:4, perdido:5 };
 const telChave = t => String(t||'').replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').slice(-11);
 const telIntl = t => /^\s*\+/.test(String(t||'')) && !/^\s*\+\s*55/.test(String(t||'')); // estrangeiro (ex.: +44 Reino Unido)
@@ -1611,11 +1613,12 @@ async function syncAgente() {
       if(!l) {
         l = { id: state.nextId++, nome: c.nome || fmtTel(c.telefone), tel: fmtTel(c.telefone), email:'', renda: c.renda || '', regiao:'', imovel: c.empreendimento || '',
               valor:0, ato:0, fgts:false, fgtsValor:0, fgtsAnos:0, pv:'', ac:'', origem: c.origem || 'WhatsApp (agente)', etapa: etapaAg || 'lead',
-              obs: resumo, score: c.prioridade || 0, data: hoje(), agente: { tel: c.telefone, etapaAplicada: etapaAg || 'lead', scoreAuto: true } };
+              obs: resumo, score: c.prioridade || 0, data: hoje(), agente: { tel: c.telefone, etapaAplicada: etapaAg || 'lead', scoreAuto: true, etapaAgente: c.etapa } };
         state.leads.push(l); porTel.set(k, l); mudou = true;
       } else {
         if(!l.agente) l.agente = { tel: c.telefone, etapaAplicada: l.etapa, scoreAuto: !l.score };
         const ag = l.agente;
+        if(ag.etapaAgente !== c.etapa) { ag.etapaAgente = c.etapa; mudou = true; }
         const manual = l.etapa !== ag.etapaAplicada; // você moveu o card: o agente não mexe mais na etapa
         if(etapaAg && !manual && etapaAg !== l.etapa && !['vendido','perdido'].includes(l.etapa)) {
           const pode = etapaAg === 'perdido' ? l.etapa === 'lead' : AG_ORDEM[etapaAg] > AG_ORDEM[l.etapa]; // só pra frente
@@ -1659,6 +1662,13 @@ async function syncAgente() {
           mudou = true;
         }
       }
+    }
+    // ── Contatos marcados "não é lead" na base (ex.: o próprio Well): sai do quadro, menos venda ──
+    const ign = new Set((r.ignorados || []).map(telChave));
+    if(ign.size) {
+      const antes = state.leads.length;
+      state.leads = state.leads.filter(l => !(l.agente && ign.has(telChave(l.agente.tel)) && l.etapa !== 'vendido' && !state.vendas.some(v => v.leadId === l.id)));
+      if(state.leads.length !== antes) mudou = true;
     }
     // ── Agenda: o agente precisa de você ──
     for(const t of r.tarefas) {
@@ -2434,6 +2444,7 @@ function renderPipeline() {
               ' onclick="verLead('+l.id+')" id="lcard-'+l.id+'">'+
               '<div class="lead-name">'+l.nome+'</div>'+
               '<div class="lead-imovel">🏠 '+(l.imovel||'—')+'</div>'+
+              (etapa==='lead' && AG_ETAPA_LABEL[l.agente?.etapaAgente] ? '<div style="margin:3px 0"><span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--bg4);color:var(--text2)">🤖 '+AG_ETAPA_LABEL[l.agente.etapaAgente]+'</span></div>' : '')+
               (etapa==='vendido' && currentUser?.agente ? htmlCompraCard(l) : '')+
               (ult ? '<div style="font-size:10px;color:var(--text3);margin-top:3px;padding:3px 6px;background:var(--bg4);border-radius:4px">↪ <span style="color:var(--text2)">'+ETAPA_LABEL[ult.para]+'</span> · '+ult.dataHora+(ult.obs?'<br><span style="color:var(--yellow)">'+ult.obs+'</span>':'')+'</div>' : '')+
               (l.motivoPerda&&l.etapa==='perdido'?'<div style="font-size:10px;color:var(--red);margin-top:2px">😔 '+l.motivoPerda+'</div>':'')+
