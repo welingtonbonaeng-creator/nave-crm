@@ -1619,6 +1619,7 @@ async function syncAgente() {
         if(!l.agente) l.agente = { tel: c.telefone, etapaAplicada: l.etapa, scoreAuto: !l.score };
         const ag = l.agente;
         if(ag.etapaAgente !== c.etapa) { ag.etapaAgente = c.etapa; mudou = true; }
+        if(c.ficha && ag.fichaEm !== c.ficha_em) { ag.ficha = c.ficha; ag.fichaEm = c.ficha_em; mudou = true; } // ficha de passagem (reta final)
         const manual = l.etapa !== ag.etapaAplicada; // você moveu o card: o agente não mexe mais na etapa
         if(etapaAg && !manual && etapaAg !== l.etapa && !['vendido','perdido'].includes(l.etapa)) {
           const pode = etapaAg === 'perdido' ? l.etapa === 'lead' : AG_ORDEM[etapaAg] > AG_ORDEM[l.etapa]; // só pra frente
@@ -2444,6 +2445,7 @@ function renderPipeline() {
               ' onclick="verLead('+l.id+')" id="lcard-'+l.id+'">'+
               '<div class="lead-name">'+l.nome+'</div>'+
               '<div class="lead-imovel">🏠 '+(l.imovel||'—')+'</div>'+
+              (l.agente?.ficha ? '<div style="margin:3px 0"><span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#1e3a8a;color:#bfdbfe">📋 Ficha pronta</span></div>' : '')+
               (etapa==='lead' && AG_ETAPA_LABEL[l.agente?.etapaAgente] ? '<div style="margin:3px 0"><span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--bg4);color:var(--text2)">🤖 '+AG_ETAPA_LABEL[l.agente.etapaAgente]+'</span></div>' : '')+
               (etapa==='vendido' && currentUser?.agente ? htmlCompraCard(l) : '')+
               (ult ? '<div style="font-size:10px;color:var(--text3);margin-top:3px;padding:3px 6px;background:var(--bg4);border-radius:4px">↪ <span style="color:var(--text2)">'+ETAPA_LABEL[ult.para]+'</span> · '+ult.dataHora+(ult.obs?'<br><span style="color:var(--yellow)">'+ult.obs+'</span>':'')+'</div>' : '')+
@@ -3115,7 +3117,10 @@ function verLead(id) {
     if(link) { btnWa.href = link; btnWa.style.display = 'inline-flex'; }
     else      { btnWa.style.display = 'none'; }
   }
-  document.getElementById('detalheBody').innerHTML = `
+  const fichaHTML = l.agente?.ficha ? `<div style="background:var(--bg3);border:1px solid #1e3a8a;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#93c5fd;margin-bottom:6px">📋 Ficha de passagem (agente) · ${l.agente.fichaEm ? new Date(l.agente.fichaEm).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}) : ''}</div>
+      <div style="font-size:12px;line-height:1.55;white-space:pre-wrap;color:var(--text2)">${String(l.agente.ficha).replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]))}</div></div>` : '';
+  document.getElementById('detalheBody').innerHTML = fichaHTML + `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Nome completo</label><input class="form-input" id="dNome" value="${l.nome||''}" placeholder="Nome do lead"></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Telefone</label><input class="form-input" id="dTel" value="${l.tel||''}" placeholder="(21) 99999-0000"></div>
