@@ -1588,6 +1588,8 @@ const telChave = t => String(t||'').replace(/\D/g,'').replace(/^55(?=\d{10,11}$)
 const telIntl = t => /^\s*\+/.test(String(t||'')) && !/^\s*\+\s*55/.test(String(t||'')); // estrangeiro (ex.: +44 Reino Unido)
 const fmtTel = t => { if(telIntl(t)) return '+' + String(t).replace(/\D/g,''); const d = telChave(t); return d.length === 11 ? `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}` : (t||''); };
 let _syncRodando = false;
+let _prioAgente = new Map(), _prioAssin = "";
+const prioDoLead = l => l.agente ? _prioAgente.get(telChave(l.agente.tel)) : null;
 async function syncAgente() {
   // comissão do Well: 1,9% nas vendas antigas importadas (padrão errado era 6%); vendas novas 2% vêm na compra
   if(currentUser && currentUser.agente && !state.comissaoMigrada){ (state.vendas||[]).forEach(v => { if(v.importado && v.comissao === 0.06) v.comissao = 0.019; }); state.comissaoMigrada = true; }
@@ -1664,6 +1666,10 @@ async function syncAgente() {
         }
       }
     }
+    // ── Prioridade da triagem (JOSÉ): só na tela, não salva no quadro ──
+    const novaPrio = new Map((r.prioridades || []).map(p => [telChave(p.telefone), p]));
+    const assin = JSON.stringify([...novaPrio.entries()].map(([k, p]) => [k, p.pos]));
+    if(assin !== _prioAssin) { _prioAgente = novaPrio; _prioAssin = assin; if(!mudou) render(); }
     // ── Contatos marcados "não é lead" na base (ex.: o próprio Well): sai do quadro, menos venda ──
     const ign = new Set((r.ignorados || []).map(telChave));
     if(ign.size) {
@@ -2411,7 +2417,8 @@ function renderPipeline() {
   }
 
   document.getElementById('pipelineBoard').innerHTML = ETAPAS.map(etapa => {
-    const leads = state.leads.filter(l => l.etapa === etapa && (!filtroQuentes || ehQuenteLead(l)));
+    const leads = state.leads.filter(l => l.etapa === etapa && (!filtroQuentes || ehQuenteLead(l)))
+      .map((l, i) => [l, i]).sort((a, b) => ((prioDoLead(a[0])?.pos ?? 1e6) - (prioDoLead(b[0])?.pos ?? 1e6)) || (a[1] - b[1])).map(x => x[0]); // prioritários no topo, resto na sua ordem
     return `
       <div class="pipe-col">
         <div class="pipe-header">
@@ -2445,6 +2452,7 @@ function renderPipeline() {
               ' onclick="verLead('+l.id+')" id="lcard-'+l.id+'">'+
               '<div class="lead-name">'+l.nome+'</div>'+
               '<div class="lead-imovel">🏠 '+(l.imovel||'—')+'</div>'+
+              (prioDoLead(l) && !['vendido','perdido'].includes(etapa) ? '<div style="margin:3px 0" title="'+escA(prioDoLead(l).motivo||'')+'"><span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;background:#7c2d12;color:#fed7aa">🔥 Prioridade '+prioDoLead(l).pos+'</span><div style="font-size:10px;color:var(--text3);margin-top:2px">'+escA(prioDoLead(l).motivo||'')+'</div></div>' : '')+
               (l.agente?.ficha ? '<div style="margin:3px 0"><span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#1e3a8a;color:#bfdbfe">📋 Ficha pronta</span></div>' : '')+
               (etapa==='lead' && AG_ETAPA_LABEL[l.agente?.etapaAgente] ? '<div style="margin:3px 0"><span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--bg4);color:var(--text2)">🤖 '+AG_ETAPA_LABEL[l.agente.etapaAgente]+'</span></div>' : '')+
               (etapa==='vendido' && currentUser?.agente ? htmlCompraCard(l) : '')+
