@@ -1666,27 +1666,21 @@ async function syncAgente() {
         }
       }
     }
-    // ── Manutenções (aplica cada uma uma única vez) ──
-    state.manutAplicadas = state.manutAplicadas || [];
+    // ── Manutenções: operações idempotentes (rodar de novo não muda nada); só grava se algo mudou ──
     for(const m of (r.manutencoes || [])) {
-      if(state.manutAplicadas.includes(m.id)) continue;
       for(const op of (m.ops || [])) {
-        if(op.op === 'remover_lead') { state.leads = state.leads.filter(l => l.id !== op.leadId); state.vendas = state.vendas.filter(v => v.leadId !== op.leadId); }
+        if(op.op === 'remover_lead' && state.leads.some(l => l.id === op.leadId)) {
+          state.leads = state.leads.filter(l => l.id !== op.leadId); state.vendas = state.vendas.filter(v => v.leadId !== op.leadId); mudou = true;
+        }
         if(op.op === 'venda_set') {
-          // mesma PV = mesma venda (parcelas somam); sem PV na venda ainda: a 1ª venda do lead sem PV (ou a do compraIdx)
+          // mesma PV = mesma venda (parcelas somam); sem PV ainda: a venda do lead naquele compraIdx (ou a 1ª sem PV)
           const doLead = state.vendas.filter(x => x.leadId === op.leadId);
           let v = doLead.find(x => op.set.pv && x.pv === op.set.pv)
                || (op.nova ? null : doLead.find(x => !x.pv && (op.compraIdx === undefined || x.compraIdx === op.compraIdx)));
-          if(!v && op.nova) { const l = state.leads.find(x => x.id === op.leadId); v = { id: state.nextId++, leadId: op.leadId, cliente: l ? l.nome : (op.cliente || ''), valor: 0, comissao: 0.019, comissaoCoord: 0, premio: 0, cancelada: false, importado: true }; state.vendas.push(v); }
-          if(v) Object.assign(v, op.set);
-        }
-        if(op.op === 'lead_novo') {
-          const l = { id: state.nextId++, email:'', renda:'', valor:0, ato:0, fgts:false, fgtsValor:0, fgtsAnos:0, pv:'', ac:'', score:0, tel:'', regiao:'', data: hoje(), origem:'', obs:'', ...op.lead, etapa:'vendido' };
-          state.leads.push(l);
-          (op.vendas || []).forEach(vs => state.vendas.push({ id: state.nextId++, leadId: l.id, cliente: l.nome, valor: 0, comissao: 0.019, comissaoCoord: 0, premio: 0, cancelada: false, importado: true, ...vs }));
+          if(!v && op.nova && state.leads.some(l => l.id === op.leadId)) { const l = state.leads.find(x => x.id === op.leadId); v = { id: state.nextId++, leadId: op.leadId, cliente: l.nome, valor: 0, comissao: 0.019, comissaoCoord: 0, premio: 0, cancelada: false, importado: true }; state.vendas.push(v); mudou = true; }
+          if(v) { const antes = JSON.stringify(v); Object.assign(v, op.set); if(JSON.stringify(v) !== antes) mudou = true; }
         }
       }
-      state.manutAplicadas.push(m.id); mudou = true;
     }
     // ── Prioridade da triagem (JOSÉ): só na tela, não salva no quadro ──
     const novaPrio = new Map((r.prioridades || []).map(p => [telChave(p.telefone), p]));
