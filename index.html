@@ -1680,6 +1680,10 @@ async function syncAgente() {
           if(!v && op.nova && state.leads.some(l => l.id === op.leadId)) { const l = state.leads.find(x => x.id === op.leadId); v = { id: state.nextId++, leadId: op.leadId, cliente: l.nome, valor: 0, comissao: 0.019, comissaoCoord: 0, premio: 0, cancelada: false, importado: true }; state.vendas.push(v); mudou = true; }
           if(v) { const antes = JSON.stringify(v); Object.assign(v, op.set); if(JSON.stringify(v) !== antes) mudou = true; }
         }
+        if(op.op === 'lead_set') {
+          const l = state.leads.find(x => x.id === op.leadId);
+          if(l) { const antes = JSON.stringify(l); Object.assign(l, op.set); if(op.set.etapa && l.agente) l.agente.etapaAplicada = op.set.etapa; if(JSON.stringify(l) !== antes) mudou = true; }
+        }
       }
     }
     // ── Prioridade da triagem (JOSÉ): só na tela, não salva no quadro ──
