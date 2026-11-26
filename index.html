@@ -703,6 +703,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 
     <div class="page" id="pageAgente">
       <div id="agenteContent"><div class="empty"><p>Carregando...</p></div></div>
+      <div id="agenteFinanceiro" style="margin-top:16px"></div>
     </div>
 
   </div>
@@ -1878,12 +1879,50 @@ function melhorHorario(c) {
 }
 function fmtQuando(iso) { if(!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
 let agenteMov = null, agenteLic = null;
+// ── ERASTO · Financeiro IA ──
+const NOMES_AG = { estevao:'ESTÊVÃO (SDR)', daniel:'DANIEL (crédito)', lidia:'LÍDIA (closer)', rute:'RUTE (follow-up)', neemias:'NEEMIAS (pós-venda)', timoteo:'TIMÓTEO (radar de falhas)', bezalel:'BEZALEL (campanhas)', esdras:'ESDRAS (prints do grupo Leads)', rascunhos:'/rascunhos (sem divisão)' };
+const usd = v => v == null ? '—' : 'US$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const tk = v => { v = Number(v) || 0; return v >= 1e6 ? (v/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mi' : v >= 1e3 ? Math.round(v/1e3)+' mil' : String(v); };
+async function loadFinanceiro() {
+  const el = document.getElementById('agenteFinanceiro'); if(!el) return;
+  const f = await api('agente_financeiro', { dias: 30 });
+  if(f.error) { el.innerHTML = ''; return; }
+  const t = f.total, h = f.hoje, pct = Math.round((h.pct||0)*100);
+  const corH = h.alerta === 'pausado' ? 'var(--red)' : h.alerta === 'atencao' ? 'var(--yellow)' : 'var(--green)';
+  const maxAg = Math.max(...f.por_agente.map(a => a.usd), 0.0001), maxDia = Math.max(...f.por_dia.map(d => d.usd), 0.0001);
+  el.innerHTML = `<div class="card">
+    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px"><div style="font-size:14px;font-weight:700">💰 Financeiro IA (ERASTO)</div><div style="font-size:11px;color:var(--text3)">últimos ${f.dias} dias</div></div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Os agentes rodam no seu plano do Claude: não há cobrança por uso. "US$" = quanto custaria na API (equivalente), pra medir o peso de cada funcionário digital.</div>
+    ${h.alerta ? `<div style="padding:8px 10px;border-radius:8px;margin-bottom:12px;background:${h.alerta==='pausado'?'var(--redbg)':'var(--yellowbg)'};color:${corH};font-size:12px;font-weight:600">${h.alerta==='pausado' ? '⛔ Consumo de hoje passou de 90% do orçamento: agentes automáticos pausados até amanhã.' : '⚠️ Consumo de hoje passou de 70% do orçamento.'}</div>` : ''}
+    <div class="stats-grid" style="margin-bottom:14px">
+      <div class="stat-card"><div class="stat-label">Hoje</div><div class="stat-val" style="color:${corH}">${usd(h.usd)}</div><div class="stat-delta">${pct}% do orçamento de ${usd(f.teto_usd_dia)}/dia</div></div>
+      <div class="stat-card"><div class="stat-label">Últimos 7 dias</div><div class="stat-val accent">${usd(t.usd_7d)}</div><div class="stat-delta">30 dias: ${usd(t.usd)} · ${tk(t.tokens)} tokens</div></div>
+      <div class="stat-card"><div class="stat-label">Por lead · por atendimento</div><div class="stat-val blue" style="font-size:18px">${usd(t.por_lead)} · ${usd(t.por_atendimento)}</div><div class="stat-delta">${t.leads} leads · ${t.atendimentos} sugestões</div></div>
+      <div class="stat-card"><div class="stat-label">Por reunião agendada</div><div class="stat-val green">${usd(t.por_reuniao)}</div><div class="stat-delta">${t.reunioes} reunião(ões) no período</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+      <div><div style="font-size:12px;font-weight:700;margin-bottom:6px">Quem mais consome</div>
+        ${f.por_agente.length ? f.por_agente.map(a => `<div style="margin-bottom:7px"><div style="display:flex;justify-content:space-between;font-size:12px"><span>${escA(NOMES_AG[a.agente] || a.agente)}</span><span style="font-family:'JetBrains Mono',monospace">${usd(a.usd)}</span></div>
+          <div style="height:6px;background:var(--bg4);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.max(2,a.usd/maxAg*100)}%;background:var(--accent)"></div></div>
+          <div style="font-size:10px;color:var(--text3)">${a.rodadas} rodada(s) · ${tk(a.tokens)} tokens${a.sugestoes ? ' · '+a.sugestoes+' sugestões · '+usd(a.usd/a.sugestoes)+'/sugestão' : ''}</div></div>`).join('') : '<div style="font-size:12px;color:var(--text3)">Ainda sem rodadas registradas. Aparecem a partir da próxima rodada automática.</div>'}
+      </div>
+      <div><div style="font-size:12px;font-weight:700;margin-bottom:6px">Por dia (automático · suas sessões com o Claude)</div>
+        ${f.por_dia.slice(-14).map(d => `<div style="display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:4px"><span style="width:40px;color:var(--text3)">${d.dia.slice(8,10)}/${d.dia.slice(5,7)}</span>
+          <div style="flex:1;height:8px;background:var(--bg4);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.max(1,d.usd/maxDia*100)}%;background:var(--yellow)"></div></div>
+          <span style="width:74px;text-align:right;font-family:'JetBrains Mono',monospace">${usd(d.usd)}</span><span style="width:70px;text-align:right;color:var(--text3)">${tk(d.sessoes_tokens)}</span></div>`).join('') || '<div style="font-size:12px;color:var(--text3)">Sem dados ainda.</div>'}
+        <div style="font-size:12px;font-weight:700;margin:12px 0 6px">Modelo usado</div>
+        ${f.por_modelo.map(m => `<div style="display:flex;justify-content:space-between;font-size:12px"><span>${escA(m.modelo)}</span><span>${m.rodadas} rodada(s) · ${usd(m.usd)}</span></div>`).join('') || '<div style="font-size:12px;color:var(--text3)">—</div>'}
+        <div style="font-size:10px;color:var(--text3);margin-top:8px">Suas sessões com o Claude: ${tk(t.sessoes_tokens)} tokens no período (consome o mesmo plano).</div>
+      </div>
+    </div></div>`;
+}
 async function loadAgente() {
   const [r, m, l, q] = await Promise.all([api('agente_get'), api('agente_movimentos'), api('agente_licoes'), api('agente_quentes')]);
   agenteQuentes = q.error ? [] : (q.quentes || []);
   const el = document.getElementById('agenteContent');
   if(r.error) { el.innerHTML = `<div class="empty"><p>${escA(r.error)}</p></div>`; return; }
   agenteData = r; agenteMov = m.error ? null : m; agenteLic = l.error ? null : l;
+  loadFinanceiro();
   await carregarSemResposta();
   // não redesenha enquanto a pessoa digita num campo da aba
   const foco = document.activeElement;
