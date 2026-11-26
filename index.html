@@ -1585,7 +1585,7 @@ async function resetSenha(username) {
 // Roda só para quem tem o agente ligado (hoje: só o Well) e só no quadro DELE.
 // Roda aqui no navegador e salva junto com o resto: o salvamento automático nunca apaga o que o agente colocou.
 // ══════════════════════════════════════════════
-const AG_ETAPA = { novo:'lead', diagnostico:'lead', regiao:'lead', valor:'lead', financiamento:'negociacao', simulacao:'negociacao', visita:'visita', perdido:'perdido', vendido:'vendido' };
+const AG_ETAPA = { novo:'lead', diagnostico:'lead', regiao:'lead', valor:'lead', financiamento:'negociacao', simulacao:'negociacao', visita:'visita', humano:'visita', futuro:'futuro', perdido:'perdido', vendido:'vendido' };
 // etapa fina do agente, mostrada como etiqueta no card (o quadro continua com as colunas do Well)
 const AG_ETAPA_LABEL = { novo:'Novo', diagnostico:'Diagnóstico', regiao:'Região', valor:'Valor', financiamento:'Financiamento', simulacao:'Simulação', visita:'Visita' };
 const AG_ORDEM = { lead:0, futuro:0, negociacao:1, proposta:2, visita:3, vendido:4, perdido:5 };
@@ -1629,7 +1629,7 @@ async function syncAgente() {
         if(c.ficha && ag.fichaEm !== c.ficha_em) { ag.ficha = c.ficha; ag.fichaEm = c.ficha_em; mudou = true; } // ficha de passagem (reta final)
         const manual = l.etapa !== ag.etapaAplicada; // você moveu o card: o agente não mexe mais na etapa
         if(etapaAg && !manual && etapaAg !== l.etapa && !['vendido','perdido'].includes(l.etapa)) {
-          const pode = etapaAg === 'perdido' ? true : AG_ORDEM[etapaAg] > AG_ORDEM[l.etapa]; // só pra frente; desistência vale de qualquer coluna (se você não moveu o card)
+          const pode = (etapaAg === 'perdido' || etapaAg === 'futuro' || l.etapa === 'futuro') ? true : AG_ORDEM[etapaAg] > AG_ORDEM[l.etapa]; // só pra frente; desistência vale de qualquer coluna (se você não moveu o card)
           if(pode) { l.etapa = etapaAg; ag.etapaAplicada = etapaAg; mudou = true; }
         }
         if(!l.renda && c.renda) { l.renda = c.renda; mudou = true; }
