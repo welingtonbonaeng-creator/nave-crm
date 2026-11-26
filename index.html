@@ -563,6 +563,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
     <div class="nav-item" onclick="showPage('vendas')"><span class="ico">💰</span><span>Vendas</span></div>
     <div class="nav-item" id="navMetas" style="display:none" onclick="showPage('metas')"><span class="ico">🎯</span><span>Painel de Metas</span></div>
     <div class="nav-item" id="navAgente" style="display:none" onclick="showPage('agente')"><span class="ico">🤖</span><span>Agente</span><span class="nav-badge" id="badgeSemResp" style="display:none;background:var(--red);color:#fff" title="Conversas sem resposta">0</span></div>
+    <div class="nav-item" id="navCustos" style="display:none" onclick="showPage('custos')"><span class="ico">💰</span><span>Custos por agente</span></div>
   </nav>
   <div class="sidebar-footer">
     <div class="user-row" style="margin-bottom:8px">
@@ -703,7 +704,9 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 
     <div class="page" id="pageAgente">
       <div id="agenteContent"><div class="empty"><p>Carregando...</p></div></div>
-      <div id="agenteFinanceiro" style="margin-top:16px"></div>
+    </div>
+    <div class="page" id="pageCustos">
+      <div id="agenteFinanceiro"><div class="empty"><p>Carregando...</p></div></div>
     </div>
 
   </div>
@@ -1225,6 +1228,7 @@ function loginSuccess(user) {
   else document.getElementById('btnAdmin').style.display = 'none';
   document.getElementById('navMetas').style.display = 'flex';
   document.getElementById('navAgente').style.display = user.agente ? 'flex' : 'none';
+  document.getElementById('navCustos').style.display = user.agente ? 'flex' : 'none';
   loadUserState(user.username);
   checkBirthday(user);
   checkDailyMotivation(user);
@@ -1891,7 +1895,7 @@ async function loadFinanceiro() {
   const corH = h.alerta === 'pausado' ? 'var(--red)' : h.alerta === 'atencao' ? 'var(--yellow)' : 'var(--green)';
   const maxAg = Math.max(...f.por_agente.map(a => a.usd), 0.0001), maxDia = Math.max(...f.por_dia.map(d => d.usd), 0.0001);
   el.innerHTML = `<div class="card">
-    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px"><div style="font-size:14px;font-weight:700">💰 Financeiro IA (ERASTO)</div><div style="font-size:11px;color:var(--text3)">últimos ${f.dias} dias</div></div>
+    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px"><div style="font-size:14px;font-weight:700">Consumo de IA (ERASTO)</div><div style="font-size:11px;color:var(--text3)">últimos ${f.dias} dias</div></div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Os agentes rodam no seu plano do Claude: não há cobrança por uso. "US$" = quanto custaria na API (equivalente), pra medir o peso de cada funcionário digital.</div>
     ${h.alerta ? `<div style="padding:8px 10px;border-radius:8px;margin-bottom:12px;background:${h.alerta==='pausado'?'var(--redbg)':'var(--yellowbg)'};color:${corH};font-size:12px;font-weight:600">${h.alerta==='pausado' ? '⛔ Consumo de hoje passou de 90% do orçamento: agentes automáticos pausados até amanhã.' : '⚠️ Consumo de hoje passou de 70% do orçamento.'}</div>` : ''}
     <div class="stats-grid" style="margin-bottom:14px">
@@ -1922,7 +1926,6 @@ async function loadAgente() {
   const el = document.getElementById('agenteContent');
   if(r.error) { el.innerHTML = `<div class="empty"><p>${escA(r.error)}</p></div>`; return; }
   agenteData = r; agenteMov = m.error ? null : m; agenteLic = l.error ? null : l;
-  loadFinanceiro();
   await carregarSemResposta();
   // não redesenha enquanto a pessoa digita num campo da aba
   const foco = document.activeElement;
@@ -2217,6 +2220,7 @@ const PAGE_META = {
   vendas:    { title:'Vendas',     sub:'Resultados e comissões',        action:'' },
   metas:     { title:'Painel de Metas', sub:'Prospecção diária — meta de 1.000 contatos/mês', action:'' },
   agente:    { title:'Agente', sub:'Alertas, preços base e o perfil que o agente aprende de cada cliente', action:'' },
+  custos:    { title:'Custos por agente', sub:'Consumo de IA de cada funcionário digital, custo por lead e orçamento do ERASTO', action:'' },
 };
 function showPage(p) {
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
@@ -2230,6 +2234,7 @@ function showPage(p) {
     + (p === 'imoveis' && currentUser?.agente ? ' <a class="btn btn-ghost" href="https://melhoresimoveisrj.vercel.app/#empreendimentos" target="_blank" rel="noopener" style="margin-left:6px;text-decoration:none">🌐 Ver todos no site</a>' : '');
   render();
   if(p === 'agente') loadAgente();
+  if(p === 'custos') loadFinanceiro();
 }
 
 // ══════════════════════════════════════════════
