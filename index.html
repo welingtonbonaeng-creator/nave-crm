@@ -630,6 +630,7 @@ td.money{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--gree
 
     <!-- ═══ PIPELINE ═══ -->
     <div class="page" id="pagePipeline">
+      <div id="fechamentoBanner" style="display:none;margin-bottom:14px"></div>
       <div id="pipelineAlertBanner" style="display:none;background:var(--yellowbg);border:1px solid var(--yellow);border-radius:10px;padding:12px 16px;margin-bottom:14px"></div>
       <div class="pipeline" id="pipelineBoard"></div>
     </div>
@@ -1603,6 +1604,7 @@ async function syncAgente() {
   try {
     const r = await api('agente_sync');
     if(r.error) return;
+    agenteFechamentos = r.fechamentos || []; renderFechamentos();
     let mudou = false;
     const porTel = new Map(state.leads.map(l => [telChave(l.tel), l]));
     const nomePorTel = {};
@@ -1805,6 +1807,35 @@ async function marcarQuente(telefone, quente) {
   const r = await api('agente_quente_marcar', { telefone, quente });
   if(r.error) { alert(r.error); return; }
   await syncAgente(); loadAgente();
+}
+// ── ✅ Fechou? O agente achou boleto/ato/contrato na conversa; você confirma e o CRM faz o resto ──
+let agenteFechamentos = [];
+function renderFechamentos() {
+  const el = document.getElementById('fechamentoBanner'); if(!el) return;
+  if(!agenteFechamentos.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = 'block';
+  el.innerHTML = agenteFechamentos.map(p => {
+    const l = state.leads.find(x => telChave(x.tel) === telChave(p.telefone));
+    const nome = l?.nome || p.nome || fmtTel(p.telefone);
+    return `<div class="card" style="border-color:var(--green);margin-bottom:8px">
+      <div style="font-size:13px;font-weight:700">✅ Esse cliente fechou? <span style="font-weight:400">${escA(nome)} · o agente viu "${escA(p.palavra || '')}" na conversa</span></div>
+      <div style="font-size:12px;color:var(--text3);margin:6px 0">${(p.trecho || []).map(t => escA(t)).join('<br>')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="fechImovel${p.id}" class="form-input" style="max-width:260px" placeholder="Empreendimento / unidade" value="${escA(p.empreendimento || l?.imovel || '')}">
+        <input id="fechValor${p.id}" class="form-input" style="max-width:160px" type="number" placeholder="Valor (opcional)">
+        <button class="btn btn-primary btn-sm" onclick="responderFechamento(${p.id}, true)">✅ Sim, fechou</button>
+        <button class="btn btn-ghost btn-sm" onclick="responderFechamento(${p.id}, false)">Não</button>
+        <a class="btn btn-ghost btn-sm" style="text-decoration:none" href="https://web.whatsapp.com/send?phone=${String(p.telefone).replace(/\D/g,'')}" target="_blank" rel="noopener">Abrir conversa</a>
+      </div></div>`;
+  }).join('');
+}
+async function responderFechamento(id, fechou) {
+  const imovel = document.getElementById('fechImovel' + id)?.value || '';
+  const valor = Number(document.getElementById('fechValor' + id)?.value) || 0;
+  const r = await api('agente_fechamento_responder', { id, fechou, imovel, valor });
+  if(r.error) { alert(r.error); return; }
+  agenteFechamentos = agenteFechamentos.filter(p => p.id !== id); renderFechamentos();
+  await syncAgente();
 }
 function htmlQuentes() {
   const lista = agenteQuentes;
