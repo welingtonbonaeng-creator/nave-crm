@@ -2478,6 +2478,12 @@ function calcAlertaLead(l) {
 let dragCardEl = null;
 let dragOverCard = null;
 
+function dataVendaLead(l) { // data da venda mais recente do lead (Vendas, compras do agente ou data do lead)
+  const datas = state.vendas.filter(v => !v.cancelada && (v.leadId === l.id || (!v.leadId && v.cliente === l.nome))).map(v => v.data || '');
+  (l.agente?.compras || []).forEach(c => datas.push(c.data || ''));
+  if(l.compraData) datas.push(l.compraData);
+  return datas.filter(Boolean).sort().pop() || l.data || '';
+}
 function renderPipeline() {
   // Verificar alertas e mostrar banner
   const alertasAtivos = state.leads.filter(l => {
@@ -2513,7 +2519,9 @@ function renderPipeline() {
 
   document.getElementById('pipelineBoard').innerHTML = ETAPAS.map(etapa => {
     const leads = state.leads.filter(l => l.etapa === etapa && (!filtroQuentes || ehQuenteLead(l)))
-      .map((l, i) => [l, i]).sort((a, b) => ((prioDoLead(a[0])?.pos ?? 1e6) - (prioDoLead(b[0])?.pos ?? 1e6)) || (a[1] - b[1])).map(x => x[0]); // prioritários no topo, resto na sua ordem
+      .map((l, i) => [l, i]).sort(etapa === 'vendido'
+        ? (a, b) => dataVendaLead(b[0]).localeCompare(dataVendaLead(a[0])) || (b[1] - a[1]) // Vendido: venda mais recente no topo
+        : (a, b) => ((prioDoLead(a[0])?.pos ?? 1e6) - (prioDoLead(b[0])?.pos ?? 1e6)) || (a[1] - b[1])).map(x => x[0]); // prioritários no topo, resto na sua ordem
     return `
       <div class="pipe-col">
         <div class="pipe-header">
